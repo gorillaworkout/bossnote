@@ -1,44 +1,47 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0f0f13"/>
+      <stop offset="0%" stop-color="#15151c"/>
       <stop offset="100%" stop-color="#09090b"/>
     </linearGradient>
     <linearGradient id="duck" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#818cf8"/>
-      <stop offset="40%" stop-color="#6366f1"/>
+      <stop offset="0%" stop-color="#a5b4fc"/>
+      <stop offset="40%" stop-color="#818cf8"/>
       <stop offset="100%" stop-color="#4f46e5"/>
     </linearGradient>
-    <linearGradient id="glow" x1="0.5" y1="0" x2="0.5" y2="1">
-      <stop offset="0%" stop-color="#6366f1" stop-opacity="0.3"/>
-      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+    <linearGradient id="beak" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#c7d2fe"/>
+      <stop offset="100%" stop-color="#818cf8"/>
     </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#6366f1" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
   </defs>
 
   <!-- Background -->
-  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
 
-  <!-- Glow behind duck -->
-  <ellipse cx="256" cy="320" rx="140" ry="60" fill="url(#glow)"/>
+  <!-- Glow -->
+  <ellipse cx="252" cy="262" rx="178" ry="178" fill="url(#glow)"/>
 
-  <!-- Abstract duck head — geometric, minimal, sophisticated -->
-  <!-- Crown/head top -->
-  <path d="M176 290 C176 230 200 195 220 178" stroke="url(#duck)" stroke-width="3.5" stroke-linecap="round" fill="none"/>
-  <path d="M220 178 C240 162 272 158 292 168" stroke="url(#duck)" stroke-width="3.5" stroke-linecap="round" fill="none"/>
-  <!-- Beak hint — abstract angular -->
-  <path d="M292 168 L328 195 L320 212" stroke="url(#duck)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <!-- Jaw/neck -->
-  <path d="M320 212 C330 250 328 290 310 310" stroke="url(#duck)" stroke-width="3.5" stroke-linecap="round" fill="none"/>
-  <!-- Eye — subtle dot -->
-  <circle cx="278" cy="198" r="5" fill="#a5b4fc"/>
-  <!-- Head fill — semi-transparent -->
-  <path d="M210 200 C225 175 275 168 300 185 C315 198 318 220 305 250 C290 280 260 295 230 295 C200 295 185 275 180 250 C175 225 190 205 210 200Z" fill="#6366f1" fill-opacity="0.08"/>
-
-  <!-- Sound wave — integrated with duck (voice/mic theme) -->
-  <g transform="translate(120, 310)">
-    <rect x="0" y="-18" width="4" height="36" rx="2" fill="url(#duck)" opacity="0.9"/>
-    <rect x="12" y="-28" width="4" height="56" rx="2" fill="url(#duck)" opacity="0.7"/>
-    <rect x="24" y="-40" width="4" height="80" rx="2" fill="url(#duck)" opacity="0.45"/>
-    <rect x="36" y="-50" width="4" height="100" rx="2" fill="url(#duck)" opacity="0.25"/>
+  <!-- Voice waveform (right side — the duck is speaking) -->
+  <g fill="url(#duck)">
+    <rect x="436" y="216" width="8" height="40" rx="4"  opacity="0.9"/>
+    <rect x="456" y="196" width="8" height="80" rx="4"  opacity="0.65"/>
+    <rect x="476" y="172" width="8" height="128" rx="4" opacity="0.4"/>
   </g>
+
+  <!-- Duck head — solid circle, bold -->
+  <circle cx="248" cy="260" r="84" fill="url(#duck)"/>
+
+  <!-- Beak — rounded wedge pointing right, lighter gradient -->
+  <path d="M322 234 Q400 252 408 264 Q400 280 322 288 Z" fill="url(#beak)"/>
+
+  <!-- Eye -->
+  <circle cx="286" cy="244" r="14" fill="#0b0b10"/>
+  <circle cx="290" cy="240" r="5.5" fill="#e0e7ff"/>
+
+  <!-- Rim light (top-left) -->
+  <path d="M190 220 A84 84 0 0 1 288 182" stroke="#c7d2fe" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.35"/>
 </svg>

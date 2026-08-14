@@ -30,8 +30,8 @@ export default function LoginPage() {
     <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center p-5">
       <div className="w-full max-w-[340px]">
         <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center mx-auto mb-5 shadow-[0_4px_16px_rgb(99_102_241/0.3)]">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+          <div className="w-14 h-14 rounded-2xl overflow-hidden flex items-center justify-center mx-auto mb-5 shadow-[0_4px_16px_rgb(99_102_241/0.3)]">
+            <img src="/logo.svg" alt="BossNote" className="w-full h-full object-cover" />
           </div>
           <h1 className="text-xl font-semibold tracking-tight text-zinc-100">BossNote</h1>
           <p className="text-[13px] text-zinc-500 mt-1">Sign in to continue</p>

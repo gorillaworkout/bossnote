@@ -376,8 +376,8 @@ export default function DashboardPage() {
       {/* ═══════ HEADER ═══════ */}
       <header className="h-14 flex items-center justify-between px-5 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0 select-none">
         <div className="flex items-center gap-3">
-          <div className="w-7 h-7 rounded-md bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-[0_2px_8px_rgb(99_102_241/0.3)]">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+          <div className="w-7 h-7 rounded-md overflow-hidden flex items-center justify-center shadow-[0_2px_8px_rgb(99_102_241/0.3)]">
+            <img src="/logo.svg" alt="BossNote" className="w-full h-full object-cover" />
           </div>
           <div>
             <h1 className="text-[13px] font-semibold tracking-tight text-zinc-100">BossNote</h1>
