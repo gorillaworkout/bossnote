@@ -31,7 +31,7 @@ export default function LoginPage() {
       <div className="w-full max-w-[340px]">
         <div className="text-center mb-8">
           <div className="w-14 h-14 rounded-2xl overflow-hidden flex items-center justify-center mx-auto mb-5 shadow-[0_4px_16px_rgb(99_102_241/0.3)]">
-            <img src="/logo.svg" alt="BossNote" className="w-full h-full object-cover" />
+            <img src="/logo.png" alt="BossNote" className="w-full h-full object-cover" />
           </div>
           <h1 className="text-xl font-semibold tracking-tight text-zinc-100">BossNote</h1>
           <p className="text-[13px] text-zinc-500 mt-1">Sign in to continue</p>

@@ -377,7 +377,7 @@ export default function DashboardPage() {
       <header className="h-14 flex items-center justify-between px-5 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0 select-none">
         <div className="flex items-center gap-3">
           <div className="w-7 h-7 rounded-md overflow-hidden flex items-center justify-center shadow-[0_2px_8px_rgb(99_102_241/0.3)]">
-            <img src="/logo.svg" alt="BossNote" className="w-full h-full object-cover" />
+            <img src="/logo.png" alt="BossNote" className="w-full h-full object-cover" />
           </div>
           <div>
             <h1 className="text-[13px] font-semibold tracking-tight text-zinc-100">BossNote</h1>

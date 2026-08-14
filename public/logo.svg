@@ -4,44 +4,72 @@
       <stop offset="0%" stop-color="#15151c"/>
       <stop offset="100%" stop-color="#09090b"/>
     </linearGradient>
-    <linearGradient id="duck" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#a5b4fc"/>
-      <stop offset="40%" stop-color="#818cf8"/>
-      <stop offset="100%" stop-color="#4f46e5"/>
+    <linearGradient id="bill" x1="0" y1="0" x2="1" y2="0.3">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="55%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#ea8a08"/>
     </linearGradient>
-    <linearGradient id="beak" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#c7d2fe"/>
-      <stop offset="100%" stop-color="#818cf8"/>
+    <linearGradient id="hat" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fffaf0"/>
+      <stop offset="100%" stop-color="#f2e4c8"/>
     </linearGradient>
     <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0%" stop-color="#6366f1" stop-opacity="0.32"/>
-      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
     </radialGradient>
   </defs>
 
   <!-- Background -->
   <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+  <ellipse cx="250" cy="280" rx="180" ry="180" fill="url(#glow)"/>
 
-  <!-- Glow -->
-  <ellipse cx="252" cy="262" rx="178" ry="178" fill="url(#glow)"/>
+  <!-- Bow tie (behind head, bottom) -->
+  <path d="M 236 372 L 196 352 L 196 392 Z" fill="#ef4444"/>
+  <path d="M 236 372 L 276 352 L 276 392 Z" fill="#ef4444"/>
+  <circle cx="236" cy="372" r="12" fill="#dc2626"/>
 
-  <!-- Voice waveform (right side — the duck is speaking) -->
-  <g fill="url(#duck)">
-    <rect x="436" y="216" width="8" height="40" rx="4"  opacity="0.9"/>
-    <rect x="456" y="196" width="8" height="80" rx="4"  opacity="0.65"/>
-    <rect x="476" y="172" width="8" height="128" rx="4" opacity="0.4"/>
-  </g>
+  <!-- Head — cream/white, profile facing right -->
+  <path d="M 300 250
+           C 300 198 252 172 202 172
+           C 150 172 128 214 128 266
+           C 128 322 156 350 206 350
+           C 258 350 300 318 308 272
+           Z" fill="url(#face)"/>
 
-  <!-- Duck head — solid circle, bold -->
-  <circle cx="248" cy="260" r="84" fill="url(#duck)"/>
+  <!-- Bill — big orange, prominent, pointing right -->
+  <path d="M 298 244
+           C 330 238 372 244 408 258
+           C 430 266 432 292 416 300
+           C 384 314 344 314 304 306
+           C 296 300 294 258 298 244
+           Z" fill="url(#bill)"/>
 
-  <!-- Beak — rounded wedge pointing right, lighter gradient -->
-  <path d="M322 234 Q400 252 408 264 Q400 280 322 288 Z" fill="url(#beak)"/>
+  <!-- Bill top ridge highlight -->
+  <path d="M 298 244 C 330 238 372 244 408 258" stroke="#fde68a" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.7"/>
 
   <!-- Eye -->
-  <circle cx="286" cy="244" r="14" fill="#0b0b10"/>
-  <circle cx="290" cy="240" r="5.5" fill="#e0e7ff"/>
+  <ellipse cx="252" cy="238" rx="10" ry="14" fill="#111111"/>
 
-  <!-- Rim light (top-left) -->
-  <path d="M190 220 A84 84 0 0 1 288 182" stroke="#c7d2fe" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.35"/>
+  <!-- Sailor hat — blue crown + band + forward brim -->
+  <path d="M 166 210
+           L 166 172
+           C 166 136 226 118 272 134
+           C 300 143 314 158 314 180
+           L 314 210
+           Z" fill="url(#hat)"/>
+  <!-- hat band (ribbon) -->
+  <rect x="164" y="198" width="150" height="17" rx="4" fill="#1e3a8a"/>
+  <!-- brim (points forward/right) -->
+  <path d="M 308 196 L 356 194 C 362 194 362 206 356 206 L 310 208 Z" fill="#111827"/>
+
+  <!-- Voice waveform (right of bill — speaking) -->
+  <g fill="#60a5fa">
+    <rect x="448" y="246" width="7" height="28" rx="3.5" opacity="0.85"/>
+    <rect x="464" y="234" width="7" height="52" rx="3.5" opacity="0.6"/>
+    <rect x="480" y="220" width="7" height="80" rx="3.5" opacity="0.35"/>
+  </g>
 </svg>
