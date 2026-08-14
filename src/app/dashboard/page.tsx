@@ -399,6 +399,9 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {isBoss && (
+            <button onClick={() => window.location.href = '/dashboard/users'} className="text-[12px] text-zinc-400 hover:text-zinc-200 px-2.5 py-1.5 rounded-md hover:bg-zinc-800 transition-colors" title="Manage Users">Users</button>
+          )}
           <button onClick={() => window.location.href = '/dashboard/account'} className="text-[12px] text-zinc-400 hover:text-zinc-200 px-2.5 py-1.5 rounded-md hover:bg-zinc-800 transition-colors" title="Account">Account</button>
           {/* Desktop: inline New Task button */}
           <div className="hidden sm:flex items-center gap-2">
