@@ -1,21 +1,98 @@
 @import "tailwindcss";
 
-:root {
-  --bg: #0a0a0b;
-  --bg-card: #141416;
-  --bg-hover: #1e1e22;
-  --border: #2a2a30;
-  --text: #f4f4f5;
-  --text-muted: #71717a;
-  --accent: #6366f1;
-  --danger: #ef4444;
-  --success: #22c55e;
+@layer base {
+  :root {
+    --bg: #09090b;
+    --surface: #0f0f13;
+    --surface-raised: #18181d;
+    --overlay: #1c1c22;
+    --border: rgb(255 255 255 / 0.07);
+    --border-strong: rgb(255 255 255 / 0.10);
+    --text: #fafafa;
+    --text-secondary: #a1a1aa;
+    --text-tertiary: #71717a;
+    --accent: #818cf8;
+    --accent-soft: rgb(99 102 241 / 0.12);
+    --danger: #f87171;
+    --danger-soft: rgb(239 68 68 / 0.10);
+    --success: #34d399;
+    --warning: #fbbf24;
+    --warning-soft: rgb(251 191 36 / 0.10);
+    --radius: 0.625rem;
+    --radius-sm: 0.375rem;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 0 0 1px rgb(255 255 255 / 0.03) inset;
+  }
+
+  html {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgb(255 255 255 / 0.08); border-radius: 20px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgb(255 255 255 / 0.14); }
+
+  /* ── Selection ── */
+  ::selection { background: rgb(99 102 241 / 0.30); color: var(--text); }
 }
 
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: system-ui, -apple-system, sans-serif;
-}
+/* ── Utility classes ── */
+@layer utilities {
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-card);
+  }
+  .card-raised {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.25), 0 0 0 1px rgb(255 255 255 / 0.03) inset;
+  }
+  .glass {
+    background: rgb(255 255 255 / 0.03);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
 
-* { border-color: var(--border); }
+  /* ── Styled audio player ── */
+  .audio-styled::-webkit-media-controls-panel {
+    background: var(--overlay);
+  }
+  .audio-styled::-webkit-media-controls-current-time-display,
+  .audio-styled::-webkit-media-controls-time-remaining-display {
+    color: var(--text-secondary);
+    font-size: 11px;
+  }
+  .audio-styled::-webkit-media-controls-play-button {
+    filter: invert(0.85);
+  }
+
+  /* ── Form elements ── */
+  .input-field {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-size: 13px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .input-field:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .input-field::placeholder { color: var(--text-tertiary); }
+}

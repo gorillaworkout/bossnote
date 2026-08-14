@@ -33,10 +33,10 @@ export async function getSession(): Promise<SessionUser | null> {
   }
 }
 
-export async function login(email: string, password: string): Promise<SessionUser | null> {
+export async function login(username: string, password: string): Promise<SessionUser | null> {
   const user = await queryOne<{ id: string; email: string; name: string; password_hash: string; role: string }>(
-    'SELECT id, email, name, password_hash, role FROM users WHERE email = ?',
-    [email],
+    'SELECT id, email, name, password_hash, role FROM users WHERE LOWER(name) = LOWER(?)',
+    [username],
   );
   if (!user) return null;
 

@@ -31,13 +31,19 @@ export async function POST(
     const ai = await processVoiceNote(buffer.toString('base64'), mime, await getUserModel(user.id));
 
     await execute(
-      `UPDATE tasks SET title = ?, description = ?, transcript = ?, summary = ?,
-         steps = ?::jsonb, deliverables = ?::jsonb, questions = ?::jsonb,
+      `UPDATE tasks SET title = ?, title_id = ?, description = ?,
+         transcript = ?, transcript_id = ?, summary = ?, summary_id = ?,
+         steps = ?::jsonb, steps_id = ?::jsonb,
+         deliverables = ?::jsonb, deliverables_id = ?::jsonb,
+         questions = ?::jsonb, questions_id = ?::jsonb,
          priority = ?, deadline = ?, ai_error = NULL, updated_at = NOW()
        WHERE id = ?`,
       [
-        ai.title, ai.summary, ai.transcript, ai.summary,
-        JSON.stringify(ai.steps), JSON.stringify(ai.deliverables), JSON.stringify(ai.questions),
+        ai.title, ai.title_id, ai.summary,
+        ai.transcript, ai.transcript_id, ai.summary, ai.summary_id,
+        JSON.stringify(ai.steps), JSON.stringify(ai.steps_id),
+        JSON.stringify(ai.deliverables), JSON.stringify(ai.deliverables_id),
+        JSON.stringify(ai.questions), JSON.stringify(ai.questions_id),
         ai.priority, ai.deadline, id,
       ],
     );

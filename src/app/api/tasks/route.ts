@@ -13,6 +13,8 @@ export async function GET(request: NextRequest) {
   const filterAssignee = searchParams.get('assignee');
   const filterStatus = searchParams.get('status');
 
+  const filterSearch = searchParams.get('search');
+
   let sql = `
     SELECT t.*,
       bu.name as boss_name,
@@ -38,6 +40,12 @@ export async function GET(request: NextRequest) {
   if (filterStatus) {
     conditions.push('t.status = ?');
     values.push(filterStatus);
+  }
+
+  if (filterSearch) {
+    conditions.push('(LOWER(t.title) LIKE ? OR LOWER(t.title_id) LIKE ?)');
+    const s = `%${filterSearch.toLowerCase()}%`;
+    values.push(s, s);
   }
 
   if (conditions.length > 0) {
@@ -92,18 +100,26 @@ export async function POST(request: NextRequest) {
 
   await execute(
     `INSERT INTO tasks
-       (id, title, description, transcript, summary, steps, deliverables, questions,
+       (id, title, title_id, description, transcript, transcript_id,
+        summary, summary_id, steps, steps_id, deliverables, deliverables_id,
+        questions, questions_id,
         assignee_id, created_by, priority, status, deadline, voice_path, voice_duration, ai_error)
-     VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?, ?, 'todo', ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?, ?, 'todo', ?, ?, ?, ?)`,
     [
       taskId,
-      ai?.title ?? 'Voice note — belum ditranskrip',
+      ai?.title ?? 'Voice note — not transcribed yet',
+      ai?.title_id ?? 'Voice note — belum ditranskrip',
       ai?.summary ?? '',
       ai?.transcript ?? '',
+      ai?.transcript_id ?? '',
       ai?.summary ?? '',
+      ai?.summary_id ?? '',
       JSON.stringify(ai?.steps ?? []),
+      JSON.stringify(ai?.steps_id ?? []),
       JSON.stringify(ai?.deliverables ?? []),
+      JSON.stringify(ai?.deliverables_id ?? []),
       JSON.stringify(ai?.questions ?? []),
+      JSON.stringify(ai?.questions_id ?? []),
       assigneeId,
       user.id,
       ai?.priority ?? 'medium',

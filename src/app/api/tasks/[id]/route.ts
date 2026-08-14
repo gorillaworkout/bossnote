@@ -37,6 +37,16 @@ export async function GET(
     ),
   );
 
+  // Filter answered questions for staff. Boss always sees the full list.
+  const answeredArr = (task as Record<string, unknown>).answered_questions;
+  if (task.questions && Array.isArray(answeredArr) && answeredArr.length > 0) {
+    if (user.role !== 'boss') {
+      const answered = new Set(answeredArr as number[]);
+      task.questions = (task.questions as string[]).filter((_, i) => !answered.has(i));
+      task.questions_id = (task.questions_id as string[]).filter((_, i) => !answered.has(i));
+    }
+  }
+
   return NextResponse.json({ task, replies });
 }
 
@@ -53,7 +63,7 @@ export async function PUT(
 
   const { status } = await request.json() as { status?: string };
 
-  if (status && ['todo', 'in_progress', 'done'].includes(status)) {
+  if (status && ['todo', 'in_progress', 'waiting', 'done'].includes(status)) {
     await execute(
       'UPDATE tasks SET status = ?, updated_at = NOW() WHERE id = ?',
       [status, id],

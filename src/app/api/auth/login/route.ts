@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { login, createSession, getSession, COOKIE_NAME } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
-  const { email, password } = await request.json();
+  const { username, password } = await request.json();
 
-  const user = await login(email, password);
+  const user = await login(username, password);
   if (!user) {
-    return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
+    return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 });
   }
 
   const token = await createSession(user);
