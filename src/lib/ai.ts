@@ -11,70 +11,70 @@ export const AUDIO_MODELS = [
 export const DEFAULT_AUDIO_MODEL = AUDIO_MODELS[0];
 
 export interface VoiceTask {
-  transcript: string;         // verbatim in the language the boss spoke
+  transcript: string;         // English (verbatim if spoken in English, translated otherwise)
   transcript_id: string;      // Indonesian translation
-  title: string;
-  title_id: string;
+  title: string;              // English
+  title_id: string;           // Indonesian
   priority: 'high' | 'medium' | 'low';
   deadline: string | null;
-  summary: string;            // in the boss's language
+  summary: string;            // English
   summary_id: string;         // Indonesian for staff
-  steps: string[];
-  steps_id: string[];
-  deliverables: string[];
-  deliverables_id: string[];
-  questions: string[];        // in the boss's language
+  steps: string[];            // English
+  steps_id: string[];         // Indonesian
+  deliverables: string[];     // English
+  deliverables_id: string[];  // Indonesian
+  questions: string[];        // English
   questions_id: string[];     // Indonesian for staff
 }
 
-const SYSTEM = `You have ONE job: transcribe a voice note, then present it as a structured task.
+const SYSTEM = `You have ONE job: turn a voice note into a structured task, in TWO languages —
+English and Indonesian.
 
 ═══════════════════════════════════
-STEP 1 — TRANSCRIBE (MUST BE VERBATIM)
+STEP 1 — LISTEN & UNDERSTAND
 ═══════════════════════════════════
-Listen to the audio. Write down EVERY WORD EXACTLY as spoken, in the SAME
-LANGUAGE the speaker used. Do NOT translate. Do NOT paraphrase. Do NOT
-summarize. Do NOT convert to Indonesian. If the speaker said "ask Prista
-what she wants for Starbucks" — the transcript MUST contain those exact
-English words. If the speaker mixed languages, preserve the mix exactly.
-
-This transcript is THE SOURCE OF TRUTH. The boss will read it to verify
-your interpretation is correct. If you change even one word, you break trust.
+Listen to the audio carefully. The speaker may use ANY language (English,
+Mandarin, Indonesian, or a mix). Understand exactly what is being asked.
 
 ═══════════════════════════════════
-STEP 2 — STRUCTURED OUTPUT (BILINGUAL)
+STEP 2 — STRUCTURED OUTPUT (ENGLISH + INDONESIAN)
 ═══════════════════════════════════
-After transcribing, produce a structured task. The staff reads Indonesian,
-so every field below has an _id (Indonesian) counterpart. The non-_id fields
-stay in the SPEAKER'S ORIGINAL LANGUAGE — this is what the boss reads.
+Produce a structured task in TWO languages:
+- The primary field = ENGLISH (the boss reads English).
+- The _id field = natural INDONESIAN (the staff reads Indonesian).
+
+If the speaker spoke English, the English fields are a clean transcription.
+If the speaker spoke Mandarin (or any other language), the English fields are
+an accurate English TRANSLATION — never leave them in the original language.
 
 Output STRICTLY valid JSON (no markdown fences, no markdown):
 
 {
-  "transcript": "VERBATIM — word-for-word in speaker's language. NEVER translate.",
-  "transcript_id": "Natural Indonesian translation of the transcript for staff.",
+  "transcript": "ENGLISH — what was said, in English (verbatim if English, translated otherwise).",
+  "transcript_id": "Natural Indonesian translation for staff.",
 
-  "title": "Concise imperative task title in speaker's language, max 80 chars.",
-  "title_id": "Title translated to Indonesian.",
+  "title": "Concise imperative task title in ENGLISH, max 80 chars.",
+  "title_id": "Title in Indonesian.",
 
   "priority": "high" | "medium" | "low",
   "deadline": "YYYY-MM-DDTHH:mm:ss+07:00 or null",
 
-  "summary": "2-3 sentences in speaker's language: what is asked, expected outcome.",
+  "summary": "2-3 sentences in ENGLISH: what is asked, expected outcome.",
   "summary_id": "Same summary in Indonesian.",
 
-  "steps": ["Step 1 in speaker's language", "Step 2"],
+  "steps": ["Step 1 in English", "Step 2"],
   "steps_id": ["Langkah 1 in Indonesian", "Langkah 2"],
 
-  "deliverables": ["Tangible outputs in speaker's language"],
+  "deliverables": ["Tangible outputs in English"],
   "deliverables_id": ["Output nyata in Indonesian"],
 
-  "questions": ["Question in speaker's language — only if genuinely ambiguous"],
+  "questions": ["Question in English — only if genuinely ambiguous"],
   "questions_id": ["Pertanyaan in Indonesian — hanya jika memang ambigu"]
 }
 
 RULES
-- transcript = VERBATIM. If you translate the transcript even once, you failed.
+- The primary fields are ALWAYS English. Never leave them in Mandarin or any
+  other language — translate to English.
 - Priority: high if speaker says important/urgent/segera/ASAP or deadline < 2 days.
   low if relaxed/when you have time. Otherwise medium.
 - Deadline: resolve against today. "tomorrow evening" = tomorrow 17:00.

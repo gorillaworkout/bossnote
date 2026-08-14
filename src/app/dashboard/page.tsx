@@ -57,11 +57,11 @@ const StatusBadge = ({ status }: { status: string }) => {
   const map: Record<string, string> = {
     todo: 'bg-zinc-800 text-zinc-400',
     in_progress: 'bg-blue-950/60 text-blue-400',
-    waiting: 'bg-amber-950/50 text-amber-400',
+    waiting: 'bg-red-950/50 text-red-400',
     done: 'bg-emerald-950/50 text-emerald-400',
   };
   const labels: Record<string, string> = {
-    todo: 'To Do', in_progress: 'In Progress', waiting: 'Waiting', done: 'Done',
+    todo: 'To Do', in_progress: 'In Progress', waiting: 'Stuck', done: 'Done',
   };
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] text-[10px] font-medium tracking-wide uppercase ${map[status] || map.todo}`}>
@@ -87,6 +87,7 @@ export default function DashboardPage() {
   const [processing, setProcessing] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [assigneeId, setAssigneeId] = useState('');
 
   const [recording, setRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -119,7 +120,7 @@ export default function DashboardPage() {
     fetch('/api/auth/me').then(r => r.json()).then(d => {
       if (!d.user) { window.location.href = '/'; return; }
       setUser(d.user);
-      fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users || []));
+      fetch('/api/users').then(r => r.json()).then(d => { const u = d.users || []; setUsers(u); setAssigneeId(prev => prev || u.find((x: User) => x.role === 'member')?.id || ''); });
       fetch('/api/settings/model').then(r => r.json()).then(d => setAiModel(d.model || 'ag/gemini-3-flash'));
     }).finally(() => setLoading(false));
   }, []);
@@ -144,7 +145,7 @@ export default function DashboardPage() {
     if (!audioBlob || processing) return;
     setShowNewTask(false); setProcessing(true); setError(null);
     try {
-      const form = new FormData(); form.append('voice', audioBlob, 'recording.webm'); form.append('assignee_id', users.find(u => u.role === 'member')?.id || 'bayu-001'); form.append('voice_duration', String(recordingTime)); form.append('model', aiModel);
+      const form = new FormData(); form.append('voice', audioBlob, 'recording.webm'); form.append('assignee_id', assigneeId || users.find(u => u.role === 'member')?.id || ''); form.append('voice_duration', String(recordingTime)); form.append('model', aiModel);
       const res = await fetch('/api/tasks', { method: 'POST', body: form }); const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to create task');
       if (data.ai_error) setError(`Task saved, but transcription failed.`);
@@ -201,6 +202,9 @@ export default function DashboardPage() {
           <div className="min-w-0 flex-1">
             <p className="text-[12px] leading-snug text-zinc-200 line-clamp-2 font-medium">{task.title_id || task.title}</p>
             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+              {task.assignee_name && (
+                <span className="text-[10px] text-zinc-400 bg-zinc-800/70 border border-zinc-700/50 px-1.5 py-0.5 rounded-md font-medium">@{task.assignee_name}</span>
+              )}
               {task.deadline && (
                 <span className={`text-[10px] font-medium ${dlClass(task.deadline)}`}>
                   {ds === 'overdue' ? 'Overdue' : ds === 'today' ? 'Today' : ds === 'tomorrow' ? 'Tomorrow' : fmtDate(task.deadline)}
@@ -232,7 +236,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <select value={t.status} onChange={e => updateStatus(t.id, e.target.value)} className="input-field px-2 py-1 text-[11px] cursor-pointer">
-            <option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="waiting">Waiting</option><option value="done">Done</option>
+            <option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="waiting">Stuck</option><option value="done">Done</option>
           </select>
           <button onClick={() => setConfirmDelete(t)} className="p-1.5 text-zinc-700 hover:text-red-400 hover:bg-red-950/30 rounded-md transition-colors" title="Delete"><TrashIcon/></button>
         </div>
@@ -258,6 +262,7 @@ export default function DashboardPage() {
         <audio controls className="w-full h-[36px] mb-4 audio-styled" src={t.voice_path} preload="metadata"/>
         {t.transcript ? (
           <>
+            <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider mb-1">English</p>
             <p className="text-[13px] text-zinc-200 leading-relaxed whitespace-pre-wrap">{t.transcript}</p>
             {t.transcript_id && t.transcript_id !== t.transcript && (
               <div className="mt-3 pt-3 border-t border-[var(--border)]">
@@ -388,12 +393,13 @@ export default function DashboardPage() {
           {(pendingCount > 0 || waitingCount > 0) && (
             <div className="flex items-center gap-1.5 ml-4">
               {pendingCount > 0 && <span className="px-2 py-0.5 bg-[var(--warning-soft)] text-amber-400 text-[10px] font-medium rounded-full">{pendingCount} question{pendingCount > 1 ? 's' : ''}</span>}
-              {waitingCount > 0 && <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-[10px] font-medium rounded-full">{waitingCount} waiting</span>}
+              {waitingCount > 0 && <span className="px-2 py-0.5 bg-red-950/50 text-red-400 text-[10px] font-medium rounded-full">{waitingCount} stuck</span>}
             </div>
           )}
         </div>
 
         <div className="flex items-center gap-2">
+          <button onClick={() => window.location.href = '/dashboard/account'} className="text-[12px] text-zinc-400 hover:text-zinc-200 px-2.5 py-1.5 rounded-md hover:bg-zinc-800 transition-colors" title="Account">Account</button>
           {/* Desktop: inline New Task button */}
           <div className="hidden sm:flex items-center gap-2">
             <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
@@ -444,7 +450,7 @@ export default function DashboardPage() {
           <option value="">All status</option>
           <option value="todo">To Do</option>
           <option value="in_progress">In Progress</option>
-          <option value="waiting">Waiting</option>
+          <option value="waiting">Stuck</option>
           <option value="done">Done</option>
         </select>
         <div className="relative ml-auto">
@@ -461,9 +467,9 @@ export default function DashboardPage() {
           <div className="flex-1 flex gap-3 p-4 overflow-x-auto overflow-y-hidden">
             {(['todo', 'in_progress', 'waiting', 'done'] as const).map(status => {
               const colTasks = tasks.filter(t => t.status === status);
-              const colLabel = { todo: 'To Do', in_progress: 'In Progress', waiting: 'Waiting', done: 'Done' }[status];
-              const colHeaderBg = status === 'todo' ? 'bg-zinc-950/20' : status === 'in_progress' ? 'bg-blue-950/20' : status === 'waiting' ? 'bg-amber-950/20' : 'bg-emerald-950/20';
-              const colDot = status === 'todo' ? 'bg-zinc-500' : status === 'in_progress' ? 'bg-blue-500' : status === 'waiting' ? 'bg-amber-500' : 'bg-emerald-500';
+              const colLabel = { todo: 'To Do', in_progress: 'In Progress', waiting: 'Stuck', done: 'Done' }[status];
+              const colHeaderBg = status === 'todo' ? 'bg-zinc-950/20' : status === 'in_progress' ? 'bg-blue-950/20' : status === 'waiting' ? 'bg-red-950/20' : 'bg-emerald-950/20';
+              const colDot = status === 'todo' ? 'bg-zinc-500' : status === 'in_progress' ? 'bg-blue-500' : status === 'waiting' ? 'bg-red-500' : 'bg-emerald-500';
               return (
                 <div key={status} className="flex-1 min-w-[220px] max-w-[360px] flex flex-col bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden">
                   <div className={`flex items-center justify-between px-3 py-2.5 border-b border-[var(--border)] ${colHeaderBg} flex-shrink-0`}>
@@ -485,7 +491,7 @@ export default function DashboardPage() {
           <div className="h-9 flex items-center gap-4 px-4 border-t border-[var(--border)] bg-[var(--surface)] flex-shrink-0 text-[10px] text-zinc-600">
             <span>{tasks.length} total</span>
             {pendingCount > 0 && <span className="text-amber-500">{pendingCount} need confirmation</span>}
-            {waitingCount > 0 && <span className="text-amber-400">{waitingCount} waiting</span>}
+            {waitingCount > 0 && <span className="text-red-400">{waitingCount} stuck</span>}
           </div>
         </div>
 
@@ -495,7 +501,7 @@ export default function DashboardPage() {
           <div className="flex gap-1 p-2 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0">
             {(['todo', 'in_progress', 'waiting', 'done'] as const).map(s => {
               const count = tasks.filter(t => t.status === s).length;
-              const label = { todo: 'To Do', in_progress: 'Progress', waiting: 'Waiting', done: 'Done' }[s];
+              const label = { todo: 'To Do', in_progress: 'Progress', waiting: 'Stuck', done: 'Done' }[s];
               return (
                 <button key={s} onClick={() => setKanbanTab(s)}
                   className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all text-center ${kanbanTab === s ? 'bg-zinc-800 text-zinc-200 shadow-sm' : 'text-zinc-500'}`}>
@@ -564,6 +570,12 @@ export default function DashboardPage() {
               </button>
             ) : (
               <div className="space-y-3">
+                <div>
+                  <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Assign to</label>
+                  <select value={assigneeId} onChange={e => setAssigneeId(e.target.value)} className="input-field px-2.5 py-2 text-[13px] w-full cursor-pointer">
+                    {users.filter(u => u.role === 'member').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                </div>
                 <audio controls className="w-full h-9 audio-styled" src={audioBlob ? URL.createObjectURL(audioBlob) : ''}/>
                 <div className="flex gap-2">
                   <button onClick={createTask} className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">Create Task</button>
