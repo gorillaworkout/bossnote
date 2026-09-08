@@ -32,7 +32,7 @@ export function DashboardHeader({
   const isBoss = user.role === 'boss';
 
   return (
-    <header className="min-h-14 flex items-center justify-between gap-2 px-3 sm:px-5 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0 select-none">
+    <header className="min-h-14 flex flex-wrap items-center justify-between gap-2 px-3 sm:px-5 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0 select-none">
       <div className="flex items-center gap-3 min-w-0">
         <Link href="/dashboard" className="flex items-center gap-3 min-w-0">
           <div className="w-7 h-7 rounded-md overflow-hidden flex items-center justify-center shadow-[0_2px_8px_rgb(99_102_241/0.3)] flex-shrink-0">
@@ -67,14 +67,14 @@ export function DashboardHeader({
             Account
           </Link>
         </nav>
-        {extra}
         <button
           type="button"
           onClick={() => { void logout(); }}
-          className="text-[12px] font-medium text-zinc-200 hover:text-white px-2.5 py-1.5 rounded-md border border-[var(--border-strong)] hover:bg-zinc-800 transition-colors"
+          className="text-[12px] font-medium text-zinc-100 hover:text-white px-2.5 py-1.5 rounded-md border border-zinc-600 hover:bg-zinc-800 transition-colors flex-shrink-0"
         >
           Logout
         </button>
+        {extra}
       </div>
     </header>
   );
