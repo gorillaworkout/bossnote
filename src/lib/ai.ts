@@ -2,9 +2,9 @@ const GW_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llmdupoin.gorill
 const GW_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
 
 export const AUDIO_MODELS = [
+  'ag/gemini-3.7-flash-high',
   'ag/gemini-3-flash',
   'ag/gemini-3.6-flash-medium',
-  'ag/gemini-3.7-flash-high',
   'ag/gemini-3-flash-agent',
 ] as const;
 

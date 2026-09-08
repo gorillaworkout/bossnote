@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { queryAll, queryOne, execute } from '@/lib/database';
+import { DEFAULT_AUDIO_MODEL } from '@/lib/ai';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
   );
   await execute(
     'INSERT INTO user_settings (user_id, ai_model) VALUES (?, ?)',
-    [id, 'ag/gemini-3-flash-agent'],
+    [id, DEFAULT_AUDIO_MODEL],
   );
 
   return NextResponse.json(
