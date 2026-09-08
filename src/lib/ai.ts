@@ -2,13 +2,71 @@ const GW_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworko
 const GW_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
 
 export const AUDIO_MODELS = [
+  'ag/gemini-3.7-flash-high',
   'ag/gemini-3-flash',
   'ag/gemini-3.6-flash-medium',
-  'ag/gemini-3.5-flash-high',
   'ag/gemini-3-flash-agent',
 ] as const;
 
-export const DEFAULT_AUDIO_MODEL = AUDIO_MODELS[0];
+export const DEFAULT_AUDIO_MODEL = 'ag/gemini-3.7-flash-high';
+
+const LEGACY_GEMINI_35 = 'ag/gemini-3.5-flash-high';
+
+/** Rewrite retired / unknown audio models so stale PWAs cannot pin Gemini 3.5. */
+export function normalizeAudioModel(model: unknown): string {
+  const raw = typeof model === 'string' ? model.trim() : '';
+  if (!raw) return DEFAULT_AUDIO_MODEL;
+
+  const mapped = raw === LEGACY_GEMINI_35 || /3\.5/.test(raw)
+    ? DEFAULT_AUDIO_MODEL
+    : raw;
+
+  return (AUDIO_MODELS as readonly string[]).includes(mapped)
+    ? mapped
+    : DEFAULT_AUDIO_MODEL;
+}
+
+/** Provider errors that mean "try the default model once" instead of leaving ai_error. */
+export function isRetryableModelError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  const lower = msg.toLowerCase();
+  if (lower.includes('3.5')) return true;
+  if (lower.includes('no longer available') || lower.includes('not available')) return true;
+  if (
+    lower.includes('model') &&
+    (lower.includes('unavailable') ||
+      lower.includes('unknown') ||
+      lower.includes('invalid') ||
+      lower.includes('not found') ||
+      lower.includes('deprecated') ||
+      lower.includes('not supported'))
+  ) {
+    return true;
+  }
+  return /gateway 4\d\d/i.test(msg) && lower.includes('model');
+}
+
+export async function withModelFallback<T>(
+  model: string,
+  run: (resolvedModel: string) => Promise<T>,
+): Promise<T> {
+  const requested = normalizeAudioModel(model);
+  try {
+    return await run(requested);
+  } catch (err) {
+    if (requested !== DEFAULT_AUDIO_MODEL && isRetryableModelError(err)) {
+      console.warn(
+        '[bossnote] Audio model failed, retrying with default:',
+        requested,
+        '→',
+        DEFAULT_AUDIO_MODEL,
+        err instanceof Error ? err.message : err,
+      );
+      return run(DEFAULT_AUDIO_MODEL);
+    }
+    throw err;
+  }
+}
 
 export interface VoiceTask {
   transcript: string;         // English (verbatim if spoken in English, translated otherwise)
@@ -25,6 +83,7 @@ export interface VoiceTask {
   deliverables_id: string[];  // Indonesian
   questions: string[];        // English
   questions_id: string[];     // Indonesian for staff
+  assignee_hint: string | null; // spoken name, or null if unclear / not mentioned
 }
 
 const SYSTEM = `You have ONE job: turn a voice note into a structured task, in TWO languages —
@@ -69,7 +128,9 @@ Output STRICTLY valid JSON (no markdown fences, no markdown):
   "deliverables_id": ["Output nyata in Indonesian"],
 
   "questions": ["Question in English — only if genuinely ambiguous"],
-  "questions_id": ["Pertanyaan in Indonesian — hanya jika memang ambigu"]
+  "questions_id": ["Pertanyaan in Indonesian — hanya jika memang ambigu"],
+
+  "assignee_hint": "Spoken name of who should do the task, or null"
 }
 
 RULES
@@ -83,7 +144,11 @@ RULES
 - Questions: only genuine ambiguities the boss needs to clarify. Empty if clear.
 - Unintelligible audio: transcript = "[unclear audio]", title = "Voice note unclear".
 - If the speaker's language IS already Indonesian, the _id fields still need
-  natural Indonesian — duplicate the value, don't leave them blank.`;
+  natural Indonesian — duplicate the value, don't leave them blank.
+- assignee_hint: extract WHO the task is for when the speaker names them
+  (e.g. "untuk Bayu", "Sandra tolong…", "assign this to Bayu", "Bayu please").
+  Return only the person's name ("Bayu", "Sandra"). If nobody is named or it
+  is unclear, return null — do not guess.`;
 
 async function callGateway(body: unknown): Promise<string> {
   const res = await fetch(`${GW_BASE}/chat/completions`, {
@@ -156,6 +221,9 @@ function parseTask(raw: string, fallbackTranscript = ''): VoiceTask {
     const questions_id = strArray(p.questions_id).length > 0
       ? strArray(p.questions_id) : questions;
 
+    const hintRaw = str(p.assignee_hint);
+    const hint = hintRaw && hintRaw.toLowerCase() !== 'null' ? hintRaw : '';
+
     return {
       transcript: transcript || fallbackTranscript,
       transcript_id: transcript_id || transcript || fallbackTranscript,
@@ -171,6 +239,7 @@ function parseTask(raw: string, fallbackTranscript = ''): VoiceTask {
       deliverables_id,
       questions,
       questions_id,
+      assignee_hint: hint || null,
     };
   } catch {
     const body = cleaned || fallbackTranscript;
@@ -182,6 +251,7 @@ function parseTask(raw: string, fallbackTranscript = ''): VoiceTask {
       steps: [], steps_id: [],
       deliverables: [], deliverables_id: [],
       questions: [], questions_id: [],
+      assignee_hint: null,
     };
   }
 }
@@ -197,25 +267,27 @@ export async function processVoiceNote(
   const format = (mimeType.split(';')[0].split('/')[1] || 'webm').toLowerCase();
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
 
-  const raw = await callGateway({
-    model,
-    stream: false,
-    max_tokens: 6000,
-    temperature: 0.2,
-    messages: [
-      { role: 'system', content: SYSTEM },
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: `Today is ${today} (Asia/Jakarta). Transcribe the voice note and produce a bilingual (original language + Indonesian) structured task. JSON only.`,
-          },
-          { type: 'input_audio', input_audio: { data: audioBase64, format } },
-        ],
-      },
-    ],
-  });
+  const raw = await withModelFallback(model, (resolved) =>
+    callGateway({
+      model: resolved,
+      stream: false,
+      max_tokens: 6000,
+      temperature: 0.2,
+      messages: [
+        { role: 'system', content: SYSTEM },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `Today is ${today} (Asia/Jakarta). Transcribe the voice note and produce a bilingual (original language + Indonesian) structured task. JSON only.`,
+            },
+            { type: 'input_audio', input_audio: { data: audioBase64, format } },
+          ],
+        },
+      ],
+    }),
+  );
 
   const task = parseTask(raw);
   if (!task.transcript) throw new Error('Model returned empty transcript');
@@ -238,24 +310,26 @@ export async function transcribeReply(
     ? `\nContext: the original task was about "${context}". Use this to correctly transcribe names and places.`
     : '';
 
-  return callGateway({
-    model,
-    stream: false,
-    max_tokens: 2000,
-    temperature: 0.1,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: `Transcribe this audio VERBATIM — word for word, in WHATEVER language the speaker used. Do NOT translate. Do NOT paraphrase. Do NOT correct what was said. If a word is genuinely unclear, write [unclear] — but do NOT guess or substitute. Output ONLY the transcription.${contextNote}`,
-          },
-          { type: 'input_audio', input_audio: { data: audioBase64, format } },
-        ],
-      },
-    ],
-  });
+  return withModelFallback(model, (resolved) =>
+    callGateway({
+      model: resolved,
+      stream: false,
+      max_tokens: 2000,
+      temperature: 0.1,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `Transcribe this audio VERBATIM — word for word, in WHATEVER language the speaker used. Do NOT translate. Do NOT paraphrase. Do NOT correct what was said. If a word is genuinely unclear, write [unclear] — but do NOT guess or substitute. Output ONLY the transcription.${contextNote}`,
+            },
+            { type: 'input_audio', input_audio: { data: audioBase64, format } },
+          ],
+        },
+      ],
+    }),
+  );
 }
 
 export async function getUserModel(userId: string): Promise<string> {
@@ -264,8 +338,5 @@ export async function getUserModel(userId: string): Promise<string> {
     'SELECT ai_model FROM user_settings WHERE user_id = ?',
     [userId],
   );
-  const stored = row?.ai_model;
-  return stored && (AUDIO_MODELS as readonly string[]).includes(stored)
-    ? stored
-    : DEFAULT_AUDIO_MODEL;
+  return normalizeAudioModel(row?.ai_model);
 }
