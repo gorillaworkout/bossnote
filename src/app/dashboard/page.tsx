@@ -83,7 +83,7 @@ export default function DashboardPage() {
   const [filterAssignee, setFilterAssignee] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [aiModel, setAiModel] = useState('ag/gemini-3-flash');
+  const [aiModel, setAiModel] = useState('ag/gemini-3.7-flash-high');
   const [processing, setProcessing] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -121,7 +121,7 @@ export default function DashboardPage() {
       if (!d.user) { window.location.href = '/'; return; }
       setUser(d.user);
       fetch('/api/users').then(r => r.json()).then(d => { const u = d.users || []; setUsers(u); setAssigneeId(prev => prev || u.find((x: User) => x.role === 'member')?.id || ''); });
-      fetch('/api/settings/model').then(r => r.json()).then(d => setAiModel(d.model || 'ag/gemini-3-flash'));
+      fetch('/api/settings/model').then(r => r.json()).then(d => setAiModel(d.model || 'ag/gemini-3.7-flash-high'));
     }).finally(() => setLoading(false));
   }, []);
 
@@ -407,9 +407,9 @@ export default function DashboardPage() {
           <div className="hidden sm:flex items-center gap-2">
             <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
               className="input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
+              <option value="ag/gemini-3.7-flash-high">Gemini 3.7 Flash</option>
               <option value="ag/gemini-3-flash">Gemini 3 Flash</option>
               <option value="ag/gemini-3.6-flash-medium">Gemini 3.6 Flash</option>
-              <option value="ag/gemini-3.5-flash-high">Gemini 3.5 Flash</option>
               <option value="ag/gemini-3-flash-agent">Gemini 3 Flash Agent</option>
             </select>
             {isBoss && (
@@ -421,9 +421,9 @@ export default function DashboardPage() {
           {/* Mobile: model selector only (New Task moves to FAB) */}
           <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
             className="sm:hidden input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
+            <option value="ag/gemini-3.7-flash-high">Gemini 3.7 Flash</option>
             <option value="ag/gemini-3-flash">Gemini 3 Flash</option>
             <option value="ag/gemini-3.6-flash-medium">Gemini 3.6 Flash</option>
-            <option value="ag/gemini-3.5-flash-high">Gemini 3.5 Flash</option>
             <option value="ag/gemini-3-flash-agent">Gemini 3 Flash Agent</option>
           </select>
         </div>
