@@ -61,13 +61,42 @@ export async function PUT(
   const task = await queryOne('SELECT * FROM tasks WHERE id = ?', [id]);
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const { status } = await request.json() as { status?: string };
+  const body = await request.json() as { status?: string; assignee_id?: string };
+  const { status, assignee_id: nextAssigneeId } = body;
 
   if (status && ['todo', 'in_progress', 'waiting', 'done'].includes(status)) {
     await execute(
       'UPDATE tasks SET status = ?, updated_at = NOW() WHERE id = ?',
       [status, id],
     );
+    return NextResponse.json({ ok: true });
+  }
+
+  if (nextAssigneeId && typeof nextAssigneeId === 'string') {
+    const canReassign =
+      user.role === 'boss' ||
+      task.assignee_id === user.id ||
+      task.created_by === user.id;
+    if (!canReassign) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+    const assignee = await queryOne<{ id: string }>('SELECT id FROM users WHERE id = ?', [nextAssigneeId]);
+    if (!assignee) return NextResponse.json({ error: 'Assignee not found' }, { status: 400 });
+
+    await execute(
+      'UPDATE tasks SET assignee_id = ?, updated_at = NOW() WHERE id = ?',
+      [nextAssigneeId, id],
+    );
+
+    if (nextAssigneeId !== task.assignee_id) {
+      const { sendPushToUser } = await import('@/lib/push');
+      const title = String(task.title_id || task.title || 'Task baru');
+      void sendPushToUser(nextAssigneeId, {
+        title: 'Task baru',
+        body: title,
+        url: '/dashboard',
+      }).catch((err) => console.error('[bossnote] push after reassign failed:', err));
+    }
+
     return NextResponse.json({ ok: true });
   }
 

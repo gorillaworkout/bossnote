@@ -1,10 +1,19 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
+import type { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { queryOne } from '@/lib/database';
 
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'bossnote-dev-secret-change-in-production');
 const COOKIE_NAME = 'bn_token';
+const SESSION_MAX_AGE = 60 * 60 * 24 * 90; // 90 days
+
+const SESSION_COOKIE = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+  path: '/',
+};
 
 export interface SessionUser {
   id: string;
@@ -16,7 +25,7 @@ export interface SessionUser {
 export async function createSession(user: SessionUser): Promise<string> {
   return new SignJWT({ ...user })
     .setProtectedHeader({ alg: 'HS256' })
-    .setExpirationTime('7d')
+    .setExpirationTime('90d')
     .sign(JWT_SECRET);
 }
 
@@ -58,6 +67,20 @@ export async function getUsers(): Promise<SessionUser[]> {
     ),
   );
   return rows.map(r => ({ id: r.id, email: r.email, name: r.name, role: r.role as 'boss' | 'member' }));
+}
+
+export function setSessionCookie(response: NextResponse, token: string) {
+  response.cookies.set(COOKIE_NAME, token, {
+    ...SESSION_COOKIE,
+    maxAge: SESSION_MAX_AGE,
+  });
+}
+
+export function clearSessionCookie(response: NextResponse) {
+  response.cookies.set(COOKIE_NAME, '', {
+    ...SESSION_COOKIE,
+    maxAge: 0,
+  });
 }
 
 export { COOKIE_NAME };
