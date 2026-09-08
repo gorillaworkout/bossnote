@@ -409,7 +409,7 @@ export default function DashboardPage() {
               className="input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
               <option value="ag/gemini-3-flash">Gemini 3 Flash</option>
               <option value="ag/gemini-3.6-flash-medium">Gemini 3.6 Flash</option>
-              <option value="ag/gemini-3.5-flash-high">Gemini 3.5 Flash</option>
+              <option value="ag/gemini-3.7-flash-high">Gemini 3.7 Flash</option>
               <option value="ag/gemini-3-flash-agent">Gemini 3 Flash Agent</option>
             </select>
             {isBoss && (
@@ -423,7 +423,7 @@ export default function DashboardPage() {
             className="sm:hidden input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
             <option value="ag/gemini-3-flash">Gemini 3 Flash</option>
             <option value="ag/gemini-3.6-flash-medium">Gemini 3.6 Flash</option>
-            <option value="ag/gemini-3.5-flash-high">Gemini 3.5 Flash</option>
+            <option value="ag/gemini-3.7-flash-high">Gemini 3.7 Flash</option>
             <option value="ag/gemini-3-flash-agent">Gemini 3 Flash Agent</option>
           </select>
         </div>
