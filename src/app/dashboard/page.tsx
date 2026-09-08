@@ -83,10 +83,12 @@ export default function DashboardPage() {
   const [filterAssignee, setFilterAssignee] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [aiModel, setAiModel] = useState('ag/gemini-3-flash');
+  const [aiModel, setAiModel] = useState('ag/gemini-3.7-flash-high');
+  const [modelOptions, setModelOptions] = useState<string[]>(['ag/gemini-3.7-flash-high']);
   const [processing, setProcessing] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [assigneeId, setAssigneeId] = useState('');
 
   const [recording, setRecording] = useState(false);
@@ -120,8 +122,13 @@ export default function DashboardPage() {
     fetch('/api/auth/me').then(r => r.json()).then(d => {
       if (!d.user) { window.location.href = '/'; return; }
       setUser(d.user);
-      fetch('/api/users').then(r => r.json()).then(d => { const u = d.users || []; setUsers(u); setAssigneeId(prev => prev || u.find((x: User) => x.role === 'member')?.id || ''); });
-      fetch('/api/settings/model').then(r => r.json()).then(d => setAiModel(d.model || 'ag/gemini-3-flash'));
+      fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users || []));
+      fetch('/api/settings/model').then(r => r.json()).then(d => {
+        const options: string[] = Array.isArray(d.options) && d.options.length ? d.options : ['ag/gemini-3.7-flash-high'];
+        const model = d.model && options.includes(d.model) ? d.model : (options[0] || 'ag/gemini-3.7-flash-high');
+        setModelOptions(options);
+        setAiModel(model);
+      });
     }).finally(() => setLoading(false));
   }, []);
 
@@ -143,13 +150,23 @@ export default function DashboardPage() {
   const stopRecording = () => { mediaRecorderRef.current?.stop(); setRecording(false); if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
   const createTask = async () => {
     if (!audioBlob || processing) return;
-    setShowNewTask(false); setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setNotice(null);
     try {
-      const form = new FormData(); form.append('voice', audioBlob, 'recording.webm'); form.append('assignee_id', assigneeId || users.find(u => u.role === 'member')?.id || ''); form.append('voice_duration', String(recordingTime)); form.append('model', aiModel);
-      const res = await fetch('/api/tasks', { method: 'POST', body: form }); const data = await res.json().catch(() => ({}));
+      const form = new FormData();
+      form.append('voice', audioBlob, 'recording.webm');
+      if (assigneeId) form.append('assignee_id', assigneeId);
+      form.append('voice_duration', String(recordingTime));
+      form.append('model', aiModel);
+      const res = await fetch('/api/tasks', { method: 'POST', body: form });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to create task');
-      if (data.ai_error) setError(`Task saved, but transcription failed.`);
-      setAudioBlob(null); await fetchTasks(); if (data.task?.id) await loadTaskDetail(data.task.id);
+      setShowNewTask(false);
+      setAudioBlob(null);
+      setAssigneeId('');
+      if (data.ai_error) setError('Task saved, but transcription failed.');
+      else if (data.task?.assignee_name) setNotice(`Assigned to ${data.task.assignee_name}.`);
+      await fetchTasks();
+      if (data.task?.id) await loadTaskDetail(data.task.id);
     } catch (e) { setError((e as Error).message); } finally { setProcessing(false); }
   };
 
@@ -179,6 +196,12 @@ export default function DashboardPage() {
 
   /* ── Helpers ── */
 
+  const audioModelLabel = (id: string) => ({
+    'ag/gemini-3.7-flash-high': 'Gemini 3.7 Flash',
+    'ag/gemini-3-flash': 'Gemini 3 Flash',
+    'ag/gemini-3.6-flash-medium': 'Gemini 3.6 Flash',
+    'ag/gemini-3-flash-agent': 'Gemini 3 Flash Agent',
+  } as Record<string, string>)[id] || id.replace(/^ag\//, '');
   const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : null;
   const dlStatus = (d: string | null): string | null => { if (!d) return null; const now = Date.now(), dl = new Date(d).getTime(), today = new Date().setHours(0,0,0,0); if (dl < today) return 'overdue'; if (dl < today + 86400000) return 'today'; if (dl < today + 2*86400000) return 'tomorrow'; return null; };
@@ -407,13 +430,10 @@ export default function DashboardPage() {
           <div className="hidden sm:flex items-center gap-2">
             <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
               className="input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
-              <option value="ag/gemini-3-flash">Gemini 3 Flash</option>
-              <option value="ag/gemini-3.6-flash-medium">Gemini 3.6 Flash</option>
-              <option value="ag/gemini-3.5-flash-high">Gemini 3.5 Flash</option>
-              <option value="ag/gemini-3-flash-agent">Gemini 3 Flash Agent</option>
+              {modelOptions.map(id => <option key={id} value={id}>{audioModelLabel(id)}</option>)}
             </select>
             {isBoss && (
-              <button onClick={() => { setShowNewTask(true); setAudioBlob(null); setAudioUrl(null); }} className="h-8 px-3.5 inline-flex items-center gap-1.5 bg-gradient-to-b from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-[12px] font-medium rounded-md transition-all shadow-[0_1px_3px_rgb(99_102_241/0.25)] active:scale-[0.98]">
+              <button onClick={() => { setShowNewTask(true); setAudioBlob(null); setAudioUrl(null); setAssigneeId(''); }} className="h-8 px-3.5 inline-flex items-center gap-1.5 bg-gradient-to-b from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-[12px] font-medium rounded-md transition-all shadow-[0_1px_3px_rgb(99_102_241/0.25)] active:scale-[0.98]">
                 <PlusIcon /> New Task
               </button>
             )}
@@ -421,17 +441,14 @@ export default function DashboardPage() {
           {/* Mobile: model selector only (New Task moves to FAB) */}
           <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
             className="sm:hidden input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
-            <option value="ag/gemini-3-flash">Gemini 3 Flash</option>
-            <option value="ag/gemini-3.6-flash-medium">Gemini 3.6 Flash</option>
-            <option value="ag/gemini-3.5-flash-high">Gemini 3.5 Flash</option>
-            <option value="ag/gemini-3-flash-agent">Gemini 3 Flash Agent</option>
+            {modelOptions.map(id => <option key={id} value={id}>{audioModelLabel(id)}</option>)}
           </select>
         </div>
       </header>
 
       {/* ═══════ MOBILE FAB ═══════ */}
       {isBoss && (
-        <button onClick={() => { setShowNewTask(true); setAudioBlob(null); setAudioUrl(null); }}
+        <button onClick={() => { setShowNewTask(true); setAudioBlob(null); setAudioUrl(null); setAssigneeId(''); }}
           className="sm:hidden fixed bottom-6 right-5 z-30 w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white flex items-center justify-center shadow-[0_4px_20px_rgb(99_102_241/0.45)] active:scale-95 transition-transform">
           <PlusIcon />
         </button>
@@ -440,6 +457,7 @@ export default function DashboardPage() {
       {/* ═══════ BANNERS ═══════ */}
       {processing && <div className="h-8 bg-violet-950/40 border-b border-violet-800/40 text-violet-300 text-[12px] flex items-center justify-center gap-2 flex-shrink-0"><span className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin"/>Processing voice note…</div>}
       {error && <div className="bg-[var(--danger-soft)] border-b border-red-900/30 text-red-400 text-[12px] flex items-center px-4 py-2 flex-shrink-0"><AlertIcon /><span className="flex-1 ml-2">{error}</span><button onClick={() => setError(null)} className="text-red-500/70 hover:text-red-400 ml-3">Dismiss</button></div>}
+      {notice && <div className="bg-emerald-950/30 border-b border-emerald-900/30 text-emerald-400 text-[12px] flex items-center px-4 py-2 flex-shrink-0"><span className="flex-1">{notice}</span><button onClick={() => setNotice(null)} className="text-emerald-500/70 hover:text-emerald-400 ml-3">Dismiss</button></div>}
 
       {/* ═══════ TOOLBAR ═══════ */}
       <div className="h-11 flex items-center gap-2 px-4 border-b border-[var(--border)] bg-[var(--surface)] flex-shrink-0">
@@ -574,10 +592,12 @@ export default function DashboardPage() {
             ) : (
               <div className="space-y-3">
                 <div>
-                  <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Assign to</label>
+                  <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Override assignee (optional)</label>
                   <select value={assigneeId} onChange={e => setAssigneeId(e.target.value)} className="input-field px-2.5 py-2 text-[13px] w-full cursor-pointer">
+                    <option value="">Auto from voice (recommended)</option>
                     {users.filter(u => u.role === 'member').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                   </select>
+                  <p className="text-[11px] text-zinc-600 mt-1.5 leading-relaxed">Leave on Auto so the voice note chooses who it is for (Bayu, Sandra, …).</p>
                 </div>
                 <audio controls className="w-full h-9 audio-styled" src={audioBlob ? URL.createObjectURL(audioBlob) : ''}/>
                 <div className="flex gap-2">

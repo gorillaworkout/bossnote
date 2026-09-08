@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { queryAll, queryOne, execute } from '@/lib/database';
-import { processVoiceNote, getUserModel } from '@/lib/ai';
+import { processVoiceNote, getUserModel, normalizeAudioModel } from '@/lib/ai';
+import { resolveAssigneeFromHint } from '@/lib/assignee';
 import { saveVoice, voiceExt } from '@/lib/voice-storage';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -65,24 +66,19 @@ export async function POST(request: NextRequest) {
 
   const formData = await request.formData();
   const voiceFile = formData.get('voice') as File | null;
-  const assigneeId = formData.get('assignee_id') as string;
+  const formAssigneeId = String(formData.get('assignee_id') ?? '').trim();
 
   if (!voiceFile) return NextResponse.json({ error: 'Voice recording is required' }, { status: 400 });
-  if (!assigneeId) return NextResponse.json({ error: 'Assignee is required' }, { status: 400 });
 
-  const assignee = await queryOne('SELECT id FROM users WHERE id = ?', [assigneeId]);
-  if (!assignee) return NextResponse.json({ error: 'Assignee not found' }, { status: 400 });
+  const members = await queryAll<{ id: string; name: string }>(
+    "SELECT id, name FROM users WHERE role = 'member' ORDER BY name",
+  );
 
-  const model = (formData.get('model') as string) || (await getUserModel(user.id));
+  const model = normalizeAudioModel(
+    (formData.get('model') as string) || (await getUserModel(user.id)),
+  );
   const taskId = uuidv4();
   const buffer = Buffer.from(await voiceFile.arrayBuffer());
-
-  let voicePath: string;
-  try {
-    voicePath = saveVoice(taskId, buffer, voiceExt(voiceFile));
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
-  }
 
   const durationRaw = Number(formData.get('voice_duration'));
   const voiceDuration = Number.isFinite(durationRaw) && durationRaw > 0 ? Math.round(durationRaw) : null;
@@ -96,6 +92,26 @@ export async function POST(request: NextRequest) {
   } catch (e) {
     aiError = (e as Error).message;
     console.error('[bossnote] AI pipeline failed:', aiError);
+  }
+
+  const fromVoice = resolveAssigneeFromHint(ai?.assignee_hint, members);
+  const formUser = formAssigneeId
+    ? await queryOne<{ id: string }>('SELECT id FROM users WHERE id = ?', [formAssigneeId])
+    : undefined;
+  const assigneeId = fromVoice?.id || formUser?.id;
+
+  if (!assigneeId) {
+    return NextResponse.json(
+      { error: 'Could not tell who this task is for from the voice note. Pick an assignee and try again.' },
+      { status: 400 },
+    );
+  }
+
+  let voicePath: string;
+  try {
+    voicePath = saveVoice(taskId, buffer, voiceExt(voiceFile));
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }
 
   await execute(

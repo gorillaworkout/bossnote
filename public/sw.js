@@ -1,4 +1,4 @@
-const CACHE = 'bossnote-v1';
+const CACHE = 'bossnote-v3';
 const ASSETS = ['/', '/dashboard'];
 
 self.addEventListener('install', (e) => {
