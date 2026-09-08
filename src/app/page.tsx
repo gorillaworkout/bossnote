@@ -4,14 +4,19 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const username = String(form.get('username') || '').trim();
+    const password = String(form.get('password') || '');
+    if (!username || !password) {
+      setError('Username and password are required');
+      return;
+    }
     setLoading(true); setError('');
     try {
       const res = await fetch('/api/auth/login', {
@@ -21,6 +26,7 @@ export default function LoginPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Login failed');
       router.push('/dashboard');
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally { setLoading(false); }
@@ -37,15 +43,13 @@ export default function LoginPage() {
           <p className="text-[13px] text-zinc-500 mt-1">Sign in to continue</p>
         </div>
 
-        <form onSubmit={handleLogin} className="card p-5 space-y-4">
+        <form onSubmit={handleLogin} noValidate className="card p-5 space-y-4">
           <div>
             <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Username</label>
             <input
               type="text"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
+              name="username"
               placeholder="ian"
-              required
               autoComplete="username"
               className="input-field w-full px-3.5 py-2.5 text-[14px]"
             />
@@ -54,10 +58,8 @@ export default function LoginPage() {
             <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Password</label>
             <input
               type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
+              name="password"
               placeholder="••••••••"
-              required
               autoComplete="current-password"
               className="input-field w-full px-3.5 py-2.5 text-[14px]"
             />

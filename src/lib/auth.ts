@@ -1,10 +1,18 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
+import type { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { queryOne } from '@/lib/database';
 
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'bossnote-dev-secret-change-in-production');
 const COOKIE_NAME = 'bn_token';
+
+const SESSION_COOKIE = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+  path: '/',
+};
 
 export interface SessionUser {
   id: string;
@@ -58,6 +66,20 @@ export async function getUsers(): Promise<SessionUser[]> {
     ),
   );
   return rows.map(r => ({ id: r.id, email: r.email, name: r.name, role: r.role as 'boss' | 'member' }));
+}
+
+export function setSessionCookie(response: NextResponse, token: string) {
+  response.cookies.set(COOKIE_NAME, token, {
+    ...SESSION_COOKIE,
+    maxAge: 60 * 60 * 24 * 7, // 7 days
+  });
+}
+
+export function clearSessionCookie(response: NextResponse) {
+  response.cookies.set(COOKIE_NAME, '', {
+    ...SESSION_COOKIE,
+    maxAge: 0,
+  });
 }
 
 export { COOKIE_NAME };

@@ -20,8 +20,8 @@ export async function PUT(
   const { id } = await params;
   const { name, role } = (await request.json()) as { name?: string; role?: string };
 
-  const target = await queryOne<{ id: string; name: string }>(
-    'SELECT id, name FROM users WHERE id = ?',
+  const target = await queryOne<{ id: string; name: string; role: string }>(
+    'SELECT id, name, role FROM users WHERE id = ?',
     [id],
   );
   if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -40,12 +40,11 @@ export async function PUT(
   if (cleanRole === 'member' && target.id === user!.id) {
     return NextResponse.json({ error: 'You cannot demote yourself' }, { status: 400 });
   }
-  if (cleanRole === 'member') {
-    // Prevent removing the last boss.
+  if (cleanRole === 'member' && target.role === 'boss') {
     const bossCount = await queryOne<{ n: string }>(
       "SELECT COUNT(*)::text AS n FROM users WHERE role = 'boss'",
     );
-    if (Number(bossCount?.n ?? 0) <= 1 && target.id === user!.id) {
+    if (Number(bossCount?.n ?? 0) <= 1) {
       return NextResponse.json({ error: 'Cannot demote the last boss' }, { status: 400 });
     }
   }
