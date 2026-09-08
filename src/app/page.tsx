@@ -13,6 +13,10 @@ export default function LoginPage() {
     const form = new FormData(e.currentTarget);
     const username = String(form.get('username') || '').trim();
     const password = String(form.get('password') || '');
+    if (!username || !password) {
+      setError('Username and password are required');
+      return;
+    }
     setLoading(true); setError('');
     try {
       const res = await fetch('/api/auth/login', {
@@ -39,14 +43,13 @@ export default function LoginPage() {
           <p className="text-[13px] text-zinc-500 mt-1">Sign in to continue</p>
         </div>
 
-        <form onSubmit={handleLogin} className="card p-5 space-y-4">
+        <form onSubmit={handleLogin} noValidate className="card p-5 space-y-4">
           <div>
             <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Username</label>
             <input
               type="text"
               name="username"
               placeholder="ian"
-              required
               autoComplete="username"
               className="input-field w-full px-3.5 py-2.5 text-[14px]"
             />
@@ -57,7 +60,6 @@ export default function LoginPage() {
               type="password"
               name="password"
               placeholder="••••••••"
-              required
               autoComplete="current-password"
               className="input-field w-full px-3.5 py-2.5 text-[14px]"
             />
