@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { DashboardHeader } from '@/components/DashboardHeader';
 
 /* ── Types ── */
 
@@ -379,55 +380,41 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-[var(--bg)] flex flex-col text-[15px]">
 
       {/* ═══════ HEADER ═══════ */}
-      <header className="h-14 flex items-center justify-between px-5 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0 select-none">
-        <div className="flex items-center gap-3">
-          <div className="w-7 h-7 rounded-md overflow-hidden flex items-center justify-center shadow-[0_2px_8px_rgb(99_102_241/0.3)]">
-            <img src="/logo.png" alt="BossNote" className="w-full h-full object-cover" />
-          </div>
-          <div>
-            <h1 className="text-[13px] font-semibold tracking-tight text-zinc-100">BossNote</h1>
-            <p className="text-[10px] text-zinc-600 leading-none mt-0.5">{user.name} <span className="text-zinc-700">·</span> {isBoss ? 'Boss' : 'Team'}</p>
-          </div>
-
-          {/* Counter pills in header */}
-          {(pendingCount > 0 || waitingCount > 0) && (
-            <div className="flex items-center gap-1.5 ml-4">
-              {pendingCount > 0 && <span className="px-2 py-0.5 bg-[var(--warning-soft)] text-amber-400 text-[10px] font-medium rounded-full">{pendingCount} question{pendingCount > 1 ? 's' : ''}</span>}
-              {waitingCount > 0 && <span className="px-2 py-0.5 bg-red-950/50 text-red-400 text-[10px] font-medium rounded-full">{waitingCount} stuck</span>}
+      <DashboardHeader
+        user={user}
+        extra={
+          <>
+            <div className="hidden sm:flex items-center gap-2">
+              <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
+                className="input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
+                <option value="ag/gemini-3-flash">Gemini 3 Flash</option>
+                <option value="ag/gemini-3.6-flash-medium">Gemini 3.6 Flash</option>
+                <option value="ag/gemini-3.5-flash-high">Gemini 3.5 Flash</option>
+                <option value="ag/gemini-3-flash-agent">Gemini 3 Flash Agent</option>
+              </select>
+              {isBoss && (
+                <button onClick={() => { setShowNewTask(true); setAudioBlob(null); setAudioUrl(null); }} className="h-8 px-3.5 inline-flex items-center gap-1.5 bg-gradient-to-b from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-[12px] font-medium rounded-md transition-all shadow-[0_1px_3px_rgb(99_102_241/0.25)] active:scale-[0.98]">
+                  <PlusIcon /> New Task
+                </button>
+              )}
             </div>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          {isBoss && (
-            <button onClick={() => window.location.href = '/dashboard/users'} className="text-[12px] text-zinc-400 hover:text-zinc-200 px-2.5 py-1.5 rounded-md hover:bg-zinc-800 transition-colors" title="Manage Users">Users</button>
-          )}
-          <button onClick={() => window.location.href = '/dashboard/account'} className="text-[12px] text-zinc-400 hover:text-zinc-200 px-2.5 py-1.5 rounded-md hover:bg-zinc-800 transition-colors" title="Account">Account</button>
-          {/* Desktop: inline New Task button */}
-          <div className="hidden sm:flex items-center gap-2">
             <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
-              className="input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
+              className="sm:hidden input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
               <option value="ag/gemini-3-flash">Gemini 3 Flash</option>
               <option value="ag/gemini-3.6-flash-medium">Gemini 3.6 Flash</option>
               <option value="ag/gemini-3.5-flash-high">Gemini 3.5 Flash</option>
               <option value="ag/gemini-3-flash-agent">Gemini 3 Flash Agent</option>
             </select>
-            {isBoss && (
-              <button onClick={() => { setShowNewTask(true); setAudioBlob(null); setAudioUrl(null); }} className="h-8 px-3.5 inline-flex items-center gap-1.5 bg-gradient-to-b from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-[12px] font-medium rounded-md transition-all shadow-[0_1px_3px_rgb(99_102_241/0.25)] active:scale-[0.98]">
-                <PlusIcon /> New Task
-              </button>
-            )}
+          </>
+        }
+      >
+        {(pendingCount > 0 || waitingCount > 0) && (
+          <div className="hidden sm:flex items-center gap-1.5 ml-2">
+            {pendingCount > 0 && <span className="px-2 py-0.5 bg-[var(--warning-soft)] text-amber-400 text-[10px] font-medium rounded-full">{pendingCount} question{pendingCount > 1 ? 's' : ''}</span>}
+            {waitingCount > 0 && <span className="px-2 py-0.5 bg-red-950/50 text-red-400 text-[10px] font-medium rounded-full">{waitingCount} stuck</span>}
           </div>
-          {/* Mobile: model selector only (New Task moves to FAB) */}
-          <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
-            className="sm:hidden input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
-            <option value="ag/gemini-3-flash">Gemini 3 Flash</option>
-            <option value="ag/gemini-3.6-flash-medium">Gemini 3.6 Flash</option>
-            <option value="ag/gemini-3.5-flash-high">Gemini 3.5 Flash</option>
-            <option value="ag/gemini-3-flash-agent">Gemini 3 Flash Agent</option>
-          </select>
-        </div>
-      </header>
+        )}
+      </DashboardHeader>
 
       {/* ═══════ MOBILE FAB ═══════ */}
       {isBoss && (
