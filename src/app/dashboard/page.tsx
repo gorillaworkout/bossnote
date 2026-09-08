@@ -585,20 +585,20 @@ export default function DashboardPage() {
               <h3 className="text-base font-semibold text-zinc-100">{!audioBlob ? (recording ? 'Recording…' : 'New Voice Task') : 'Review'}</h3>
               <p className="text-[12px] text-zinc-500 mt-1">{!audioBlob ? (recording ? fmtTime(recordingTime) : 'Tap to speak') : `${fmtTime(recordingTime)} recorded`}</p>
             </div>
+            <div className="text-left mb-3">
+              <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Override assignee (optional)</label>
+              <select value={assigneeId} onChange={e => setAssigneeId(e.target.value)} className="input-field px-2.5 py-2 text-[13px] w-full cursor-pointer">
+                <option value="">Auto from voice (recommended)</option>
+                {users.filter(u => u.role === 'member').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+              <p className="text-[11px] text-zinc-600 mt-1.5 leading-relaxed">Leave on Auto so the voice note chooses who it is for (Bayu, Sandra, …).</p>
+            </div>
             {!audioBlob ? (
               <button onClick={recording ? stopRecording : startRecording} className={`w-full py-2.5 rounded-lg text-[13px] font-medium transition-all duration-200 ${recording ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-[0_2px_8px_rgb(99_102_241/0.3)]'}`}>
                 {recording ? 'Stop Recording' : 'Start Recording'}
               </button>
             ) : (
               <div className="space-y-3">
-                <div>
-                  <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Override assignee (optional)</label>
-                  <select value={assigneeId} onChange={e => setAssigneeId(e.target.value)} className="input-field px-2.5 py-2 text-[13px] w-full cursor-pointer">
-                    <option value="">Auto from voice (recommended)</option>
-                    {users.filter(u => u.role === 'member').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                  </select>
-                  <p className="text-[11px] text-zinc-600 mt-1.5 leading-relaxed">Leave on Auto so the voice note chooses who it is for (Bayu, Sandra, …).</p>
-                </div>
                 <audio controls className="w-full h-9 audio-styled" src={audioBlob ? URL.createObjectURL(audioBlob) : ''}/>
                 <div className="flex gap-2">
                   <button onClick={createTask} className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">Create Task</button>
