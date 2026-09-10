@@ -48,15 +48,19 @@ describe('taskTitles', () => {
     assert.deepEqual(taskTitles(bilingual, 'boss'), { primary: 'Review the deck', secondary: '' });
   });
 
-  it('shows Indonesian primary and English secondary for staff', () => {
+  it('shows English primary and Indonesian secondary for staff', () => {
     assert.deepEqual(taskTitles(bilingual, 'member'), {
-      primary: 'Review dek',
-      secondary: 'Review the deck',
+      primary: 'Review the deck',
+      secondary: 'Review dek',
     });
   });
 
   it('falls back when one language is missing', () => {
     assert.equal(taskTitles({ title: '', title_id: 'Konten IG' }, 'boss').primary, 'Konten IG');
+    assert.deepEqual(taskTitles({ title: '', title_id: 'Konten IG' }, 'member'), {
+      primary: 'Konten IG',
+      secondary: '',
+    });
     assert.equal(taskTitles({ title: 'Follow up', title_id: null }, 'member').primary, 'Follow up');
   });
 });
