@@ -40,7 +40,7 @@ Add those to `.env` on the server. Also required: `DATABASE_URL`, `JWT_SECRET`, 
 - **Android Chrome:** Allow notifications when prompted (or tap **Enable** on the banner).
 - **iOS Safari:** Add to Home Screen first. Web Push only works for the installed PWA, then grant notifications.
 
-After login, the dashboard registers `/sw.js?v=4` (`bossnote-v4`, network-first) and stores the subscription at `POST /api/push/subscribe`. `POST /api/push/test` sends a test notification to the current user.
+After login, the dashboard registers `/sw.js?v=5` (`bossnote-v5`, network-first) and stores the subscription at `POST /api/push/subscribe`. `POST /api/push/test` sends a test notification to the current user.
 
 ## Daily digest cron (Oracle, Asia/Jakarta)
 
@@ -57,9 +57,9 @@ The script skips users with zero open tasks (`todo` / `in_progress` / `waiting`)
 Any logged-in user (member or boss) can create:
 
 - **Voice** — same AI pipeline (Gemini 3.7 default + `assignee_hint`). Assignee can be staff or boss. Auto-from-voice still works.
-- **Ketik** — typed title/reminder, no LLM. Works when Gemini is down. `POST /api/tasks` with `text` / `title` (+ `assignee_id`, optional `priority`, `deadline`). JSON body is also accepted.
+- **Type** — typed title/reminder, no LLM. Works when Gemini is down. `POST /api/tasks` with `text` / `title` (+ `assignee_id`, optional `priority`, `deadline`). JSON body is also accepted.
 
-On create (and reassign), the assignee gets a fire-and-forget push: `Task baru`.
+On create (and reassign), the assignee gets a fire-and-forget push: title `New task`, body = English task title.
 
 Members still only see tasks assigned to them. Bosses see the full board.
 
@@ -70,4 +70,4 @@ Members still only see tasks assigned to them. Bosses see the full board.
 3. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`)
 4. Install the crontab line above
 5. Rebuild / restart (`npm run build && npm start` or your Oracle process manager)
-6. Installed PWAs pick up `bossnote-v4` after the next visit
+6. Installed PWAs pick up `bossnote-v5` after the next visit

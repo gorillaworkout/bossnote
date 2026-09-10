@@ -89,9 +89,9 @@ export async function PUT(
 
     if (nextAssigneeId !== task.assignee_id) {
       const { sendPushToUser } = await import('@/lib/push');
-      const title = String(task.title_id || task.title || 'Task baru');
+      const title = String(task.title || task.title_id || 'New task');
       void sendPushToUser(nextAssigneeId, {
-        title: 'Task baru',
+        title: 'New task',
         body: title,
         url: '/dashboard',
       }).catch((err) => console.error('[bossnote] push after reassign failed:', err));

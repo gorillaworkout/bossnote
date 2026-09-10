@@ -23,20 +23,20 @@ export function groupOpenTasksByAssignee(tasks: DigestTask[]): Map<string, Diges
   return groups;
 }
 
-/** Indonesian-friendly daily digest. Returns null when there is nothing to send. */
+/** English daily digest chrome. Prefer English task titles. Returns null when empty. */
 export function buildDigestPayload(tasks: DigestTask[]): DigestPayload | null {
   if (!tasks.length) return null;
 
   const titles = tasks
-    .map((task) => (task.title_id || task.title || '').trim())
+    .map((task) => (task.title || task.title_id || '').trim())
     .filter(Boolean);
   const top = titles.slice(0, 3);
-  const extra = titles.length > 3 ? ` (+${titles.length - 3} lagi)` : '';
+  const extra = titles.length > 3 ? ` (+${titles.length - 3} more)` : '';
   const count = tasks.length;
-  const title = count === 1 ? '1 tugas terbuka' : `${count} tugas terbuka`;
+  const title = count === 1 ? '1 open task' : `${count} open tasks`;
   const body = top.length > 0
-    ? `Kamu punya ${count} tugas: ${top.join(' · ')}${extra}`
-    : `Kamu punya ${count} tugas yang masih terbuka.`;
+    ? `You have ${count} ${count === 1 ? 'task' : 'tasks'}: ${top.join(' · ')}${extra}`
+    : `You have ${count} open ${count === 1 ? 'task' : 'tasks'}.`;
 
   return { title, body, url: '/dashboard' };
 }

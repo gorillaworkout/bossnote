@@ -74,14 +74,14 @@ export function PushEnableBanner() {
 
   return (
     <div className="bg-indigo-950/40 border-b border-indigo-800/40 text-indigo-200 text-[12px] flex items-center gap-2 px-4 py-2 flex-shrink-0">
-      <span className="flex-1">Aktifkan notifikasi HP supaya tugas baru dan reminder harian muncul di layar.</span>
+      <span className="flex-1">Enable phone notifications so new tasks and the daily reminder appear on your lock screen.</span>
       <button
         type="button"
         onClick={() => { void enable(); }}
         disabled={busy}
         className="px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-medium disabled:opacity-50"
       >
-        {busy ? 'Mengaktifkan…' : 'Enable'}
+        {busy ? 'Enabling…' : 'Enable'}
       </button>
       <button
         type="button"

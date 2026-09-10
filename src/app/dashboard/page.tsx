@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { PushEnableBanner } from '@/components/PushEnableBanner';
+import { taskTitles } from '@/lib/task-title';
 
 /* ── Types ── */
 
@@ -305,7 +306,7 @@ export default function DashboardPage() {
         <div className="flex items-start gap-2">
           <PriorityDot level={task.priority} />
           <div className="min-w-0 flex-1">
-            <p className="text-[12px] leading-snug text-zinc-200 line-clamp-2 font-medium">{task.title_id || task.title}</p>
+            <p className="text-[12px] leading-snug text-zinc-200 line-clamp-2 font-medium">{taskTitles(task, user.role).primary}</p>
             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
               {task.assignee_name && (
                 <span className="text-[10px] text-zinc-400 bg-zinc-800/70 border border-zinc-700/50 px-1.5 py-0.5 rounded-md font-medium">@{task.assignee_name}</span>
@@ -327,13 +328,15 @@ export default function DashboardPage() {
     );
   };
 
-  const renderDetailContent = (t: Task, pendingQ: string[]) => (
+  const renderDetailContent = (t: Task, pendingQ: string[]) => {
+    const heading = taskTitles(t, user.role);
+    return (
     <>
       {/* ── Title row ── */}
       <div className="flex items-start justify-between gap-4 mb-6">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-zinc-100 leading-snug">{t.title_id || t.title}</h2>
-          {t.title && t.title !== t.title_id && <p className="text-[13px] text-zinc-500 mt-0.5">{t.title}</p>}
+          <h2 className="text-lg font-semibold text-zinc-100 leading-snug">{heading.primary}</h2>
+          {heading.secondary && <p className="text-[13px] text-zinc-500 mt-0.5">{heading.secondary}</p>}
           <div className="flex items-center gap-2.5 mt-2 text-[12px] text-zinc-500 flex-wrap">
             <span>{t.boss_name} → {t.assignee_name}</span>
             {t.deadline && <span className={`font-medium ${dlClass(t.deadline)}`}>· Due {fmtDate(t.deadline)}</span>}
@@ -480,7 +483,8 @@ export default function DashboardPage() {
         )}
       </div>
     </>
-  );
+    );
+  };
 
   /* ═══════════════════════════════════════ RENDER ═══════════════════════════════════════ */
 
@@ -659,7 +663,7 @@ export default function DashboardPage() {
               <button type="button" onClick={() => { setCreateMode('voice'); }}
                 className={`flex-1 py-1.5 rounded-md text-[12px] font-medium transition-colors ${createMode === 'voice' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500'}`}>Voice</button>
               <button type="button" onClick={() => { setCreateMode('typed'); stopRecording(); }}
-                className={`flex-1 py-1.5 rounded-md text-[12px] font-medium transition-colors ${createMode === 'typed' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500'}`}>Ketik</button>
+                className={`flex-1 py-1.5 rounded-md text-[12px] font-medium transition-colors ${createMode === 'typed' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500'}`}>Type</button>
             </div>
 
             {createMode === 'voice' ? (
@@ -669,7 +673,7 @@ export default function DashboardPage() {
                     <MicIcon />
                   </div>
                   <h3 className="text-base font-semibold text-zinc-100">{!audioBlob ? (recording ? 'Recording…' : 'New Voice Task') : 'Review'}</h3>
-                  <p className="text-[12px] text-zinc-500 mt-1">{!audioBlob ? (recording ? fmtTime(recordingTime) : 'Tap to speak — or switch to Ketik if the AI is down') : `${fmtTime(recordingTime)} recorded`}</p>
+                  <p className="text-[12px] text-zinc-500 mt-1">{!audioBlob ? (recording ? fmtTime(recordingTime) : 'Tap to speak — or switch to Type if the AI is down') : `${fmtTime(recordingTime)} recorded`}</p>
                 </div>
                 <div className="text-left mb-3">
                   <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Override assignee (optional)</label>
@@ -693,8 +697,8 @@ export default function DashboardPage() {
             ) : (
               <div className="space-y-3">
                 <div className="text-center mb-2">
-                  <h3 className="text-base font-semibold text-zinc-100">Ketik reminder</h3>
-                  <p className="text-[12px] text-zinc-500 mt-1">Tanpa AI — langsung jadi tugas.</p>
+                  <h3 className="text-base font-semibold text-zinc-100">Type reminder</h3>
+                  <p className="text-[12px] text-zinc-500 mt-1">No AI — saved as a task immediately.</p>
                 </div>
                 <div>
                   <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Reminder text</label>
@@ -739,7 +743,7 @@ export default function DashboardPage() {
             </div>
             <h3 className="text-base font-semibold text-center text-zinc-100">Delete this task?</h3>
             <p className="text-[13px] text-zinc-500 text-center mt-1.5 leading-relaxed">
-              <span className="text-zinc-300 font-medium truncate block">{confirmDelete.title_id || confirmDelete.title}</span>
+              <span className="text-zinc-300 font-medium truncate block">{taskTitles(confirmDelete, user.role).primary}</span>
               This action cannot be undone.
             </p>
             <div className="flex gap-2.5 mt-5">

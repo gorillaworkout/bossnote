@@ -8,7 +8,7 @@ export async function POST() {
 
   const result = await sendPushToUser(user.id, {
     title: 'BossNote',
-    body: 'Notifikasi tes — kalau ini muncul di HP, push sudah aktif.',
+    body: 'Test notification — if this appears on your phone, push is on.',
     url: '/dashboard',
   });
 

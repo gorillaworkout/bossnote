@@ -51,16 +51,16 @@ const OPEN = ['todo', 'in_progress', 'waiting'];
 function buildDigest(tasks) {
   if (!tasks.length) return null;
   const titles = tasks
-    .map((t) => (t.title_id || t.title || '').trim())
+    .map((t) => (t.title || t.title_id || '').trim())
     .filter(Boolean);
   const top = titles.slice(0, 3);
-  const extra = titles.length > 3 ? ` (+${titles.length - 3} lagi)` : '';
+  const extra = titles.length > 3 ? ` (+${titles.length - 3} more)` : '';
   const count = tasks.length;
   return {
-    title: count === 1 ? '1 tugas terbuka' : `${count} tugas terbuka`,
+    title: count === 1 ? '1 open task' : `${count} open tasks`,
     body: top.length
-      ? `Kamu punya ${count} tugas: ${top.join(' · ')}${extra}`
-      : `Kamu punya ${count} tugas yang masih terbuka.`,
+      ? `You have ${count} ${count === 1 ? 'task' : 'tasks'}: ${top.join(' · ')}${extra}`
+      : `You have ${count} open ${count === 1 ? 'task' : 'tasks'}.`,
     url: '/dashboard',
   };
 }

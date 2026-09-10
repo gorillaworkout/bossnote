@@ -1,4 +1,4 @@
-const CACHE = 'bossnote-v4';
+const CACHE = 'bossnote-v5';
 const ASSETS = ['/logo.png'];
 
 self.addEventListener('install', (e) => {
@@ -41,7 +41,7 @@ self.addEventListener('fetch', (e) => {
 });
 
 self.addEventListener('push', (e) => {
-  let data = { title: 'BossNote', body: 'Ada update tugas', url: '/dashboard' };
+  let data = { title: 'BossNote', body: 'Task update', url: '/dashboard' };
   try {
     if (e.data) data = { ...data, ...e.data.json() };
   } catch {

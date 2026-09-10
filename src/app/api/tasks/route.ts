@@ -114,7 +114,7 @@ async function loadCreatedTask(taskId: string) {
 
 function notifyAssignee(assigneeId: string, title: string) {
   void sendPushToUser(assigneeId, {
-    title: 'Task baru',
+    title: 'New task',
     body: title,
     url: '/dashboard',
   }).catch((err) => {
@@ -187,7 +187,7 @@ export async function POST(request: NextRequest) {
     );
 
     const task = await loadCreatedTask(taskId);
-    notifyAssignee(formUser.id, fields.title_id || fields.title);
+    notifyAssignee(formUser.id, fields.title || fields.title_id);
     return NextResponse.json({ task, ai_error: null, ok: true }, { status: 201 });
   }
 
@@ -228,7 +228,7 @@ export async function POST(request: NextRequest) {
   }
 
   const title = ai?.title ?? 'Voice note — not transcribed yet';
-  const titleId = ai?.title_id ?? 'Voice note — belum ditranskrip';
+  const titleId = ai?.title_id ?? 'Voice note — not transcribed yet';
 
   await execute(
     `INSERT INTO tasks
@@ -263,6 +263,6 @@ export async function POST(request: NextRequest) {
   );
 
   const task = await loadCreatedTask(taskId);
-  notifyAssignee(assigneeId, titleId || title);
+  notifyAssignee(assigneeId, title || titleId);
   return NextResponse.json({ task, ai_error: aiError, ok: true }, { status: 201 });
 }
