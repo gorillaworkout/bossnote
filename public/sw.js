@@ -1,4 +1,4 @@
-const CACHE = 'bossnote-v5';
+const CACHE = 'bossnote-v6';
 const ASSETS = ['/logo.png'];
 
 self.addEventListener('install', (e) => {
@@ -20,11 +20,13 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-  const isAPI = url.pathname.startsWith('/api/');
+  // Network-only: never intercept /api/ (especially /api/voice/).
+  // respondWith(fetch(request)) can drop cookies on media/Range GETs → 401.
+  // Leaving the request unhandled keeps credentialed same-origin fetches intact.
+  if (url.pathname.startsWith('/api/')) return;
   const isNavigate = e.request.mode === 'navigate';
   e.respondWith((async () => {
-    // Auth pages and APIs must be network-first so logout/session changes apply.
-    if (isAPI || isNavigate) {
+    if (isNavigate) {
       try {
         return await fetch(e.request);
       } catch {
