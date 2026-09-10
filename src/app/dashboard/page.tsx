@@ -702,7 +702,7 @@ export default function DashboardPage() {
                 </div>
                 <div>
                   <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Reminder text</label>
-                  <textarea value={typedText} onChange={e => setTypedText(e.target.value)} rows={4} placeholder="Ingatkan Ian review proposal besok"
+                  <textarea value={typedText} onChange={e => setTypedText(e.target.value)} rows={4} placeholder="Remind Ian to review the proposal tomorrow"
                     className="input-field px-2.5 py-2 text-[13px] w-full resize-none" />
                 </div>
                 <div>
