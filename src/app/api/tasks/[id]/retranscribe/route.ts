@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
-import { queryOne, execute } from '@/lib/database';
-import { processVoiceNote, getUserModel } from '@/lib/ai';
+import { queryAll, queryOne, execute } from '@/lib/database';
+import { processVoiceNote, getUserModel, normalizeAudioModel } from '@/lib/ai';
+import { resolveAssigneeFromHint } from '@/lib/assignee';
 import { readVoice } from '@/lib/voice-storage';
 
 /** Re-runs the AI pipeline on an already-stored voice note. */
@@ -28,7 +29,14 @@ export async function POST(
 
   try {
     const buffer = readVoice(filename);
-    const ai = await processVoiceNote(buffer.toString('base64'), mime, await getUserModel(user.id));
+    const model = normalizeAudioModel(await getUserModel(user.id));
+    const ai = await processVoiceNote(buffer.toString('base64'), mime, model);
+
+    const team = await queryAll<{ id: string; name: string }>(
+      'SELECT id, name FROM users ORDER BY name',
+    );
+    const fromVoice = resolveAssigneeFromHint(ai.assignee_hint, team);
+    const assigneeId = fromVoice?.id || task.assignee_id;
 
     await execute(
       `UPDATE tasks SET title = ?, title_id = ?, description = ?,
@@ -36,7 +44,7 @@ export async function POST(
          steps = ?::jsonb, steps_id = ?::jsonb,
          deliverables = ?::jsonb, deliverables_id = ?::jsonb,
          questions = ?::jsonb, questions_id = ?::jsonb,
-         priority = ?, deadline = ?, ai_error = NULL, updated_at = NOW()
+         priority = ?, deadline = ?, assignee_id = ?, ai_error = NULL, updated_at = NOW()
        WHERE id = ?`,
       [
         ai.title, ai.title_id, ai.summary,
@@ -44,7 +52,7 @@ export async function POST(
         JSON.stringify(ai.steps), JSON.stringify(ai.steps_id),
         JSON.stringify(ai.deliverables), JSON.stringify(ai.deliverables_id),
         JSON.stringify(ai.questions), JSON.stringify(ai.questions_id),
-        ai.priority, ai.deadline, id,
+        ai.priority, ai.deadline, assigneeId, id,
       ],
     );
 

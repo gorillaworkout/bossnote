@@ -1,6 +1,9 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { DashboardHeader } from '@/components/DashboardHeader';
+import { PushEnableBanner } from '@/components/PushEnableBanner';
+import { taskTitles } from '@/lib/task-title';
 
 /* ── Types ── */
 
@@ -15,7 +18,7 @@ interface Task {
   questions: string[]; questions_id: string[];
   answered_questions: number[];
   ai_error: string | null;
-  deadline: string | null; voice_path: string; voice_duration: number | null;
+  deadline: string | null; voice_path: string | null; voice_duration: number | null;
   boss_name: string; assignee_name: string; assignee_id: string; created_by: string;
   created_at: string; reply_count: number;
 }
@@ -70,6 +73,39 @@ const StatusBadge = ({ status }: { status: string }) => {
   );
 };
 
+function AssigneeSelect({
+  users,
+  value,
+  onChange,
+  includeAuto,
+  autoLabel = 'Auto from voice (recommended)',
+}: {
+  users: User[];
+  value: string;
+  onChange: (id: string) => void;
+  includeAuto?: boolean;
+  autoLabel?: string;
+}) {
+  const staff = users.filter((u) => u.role === 'member');
+  const bosses = users.filter((u) => u.role === 'boss');
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className="input-field px-2.5 py-2 text-[13px] w-full cursor-pointer">
+      {includeAuto && <option value="">{autoLabel}</option>}
+      {!includeAuto && <option value="">Choose assignee…</option>}
+      {staff.length > 0 && (
+        <optgroup label="Staff">
+          {staff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </optgroup>
+      )}
+      {bosses.length > 0 && (
+        <optgroup label="Boss">
+          {bosses.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </optgroup>
+      )}
+    </select>
+  );
+}
+
 /* ── Main page ── */
 
 export default function DashboardPage() {
@@ -83,11 +119,17 @@ export default function DashboardPage() {
   const [filterAssignee, setFilterAssignee] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [aiModel, setAiModel] = useState('ag/gemini-3-flash');
+  const [aiModel, setAiModel] = useState('ag/gemini-3.7-flash-high');
+  const [modelOptions, setModelOptions] = useState<string[]>(['ag/gemini-3.7-flash-high']);
   const [processing, setProcessing] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [assigneeId, setAssigneeId] = useState('');
+  const [createMode, setCreateMode] = useState<'voice' | 'typed'>('voice');
+  const [typedText, setTypedText] = useState('');
+  const [typedPriority, setTypedPriority] = useState('medium');
+  const [typedDeadline, setTypedDeadline] = useState('');
 
   const [recording, setRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -120,8 +162,13 @@ export default function DashboardPage() {
     fetch('/api/auth/me').then(r => r.json()).then(d => {
       if (!d.user) { window.location.href = '/'; return; }
       setUser(d.user);
-      fetch('/api/users').then(r => r.json()).then(d => { const u = d.users || []; setUsers(u); setAssigneeId(prev => prev || u.find((x: User) => x.role === 'member')?.id || ''); });
-      fetch('/api/settings/model').then(r => r.json()).then(d => setAiModel(d.model || 'ag/gemini-3-flash'));
+      fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users || []));
+      fetch('/api/settings/model').then(r => r.json()).then(d => {
+        const options: string[] = Array.isArray(d.options) && d.options.length ? d.options : ['ag/gemini-3.7-flash-high'];
+        const model = d.model && options.includes(d.model) ? d.model : (options[0] || 'ag/gemini-3.7-flash-high');
+        setModelOptions(options);
+        setAiModel(model);
+      });
     }).finally(() => setLoading(false));
   }, []);
 
@@ -141,15 +188,55 @@ export default function DashboardPage() {
     setRecording(true);
   };
   const stopRecording = () => { mediaRecorderRef.current?.stop(); setRecording(false); if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+  const openNewTask = () => {
+    setShowNewTask(true);
+    setAudioBlob(null);
+    setAudioUrl(null);
+    setAssigneeId('');
+    setCreateMode('voice');
+    setTypedText('');
+    setTypedPriority('medium');
+    setTypedDeadline('');
+  };
+  const finishCreate = async (data: { task?: Task; ai_error?: string | null }, currentUser: User) => {
+    setShowNewTask(false);
+    setAudioBlob(null);
+    setAssigneeId('');
+    setTypedText('');
+    if (data.ai_error) setError('Task saved, but transcription failed.');
+    else if (data.task?.assignee_name) setNotice(`Assigned to ${data.task.assignee_name}.`);
+    await fetchTasks();
+    const canOpen = data.task?.id && (currentUser.role === 'boss' || data.task.assignee_id === currentUser.id);
+    if (canOpen && data.task?.id) await loadTaskDetail(data.task.id);
+  };
   const createTask = async () => {
     if (!audioBlob || processing) return;
-    setShowNewTask(false); setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setNotice(null);
     try {
-      const form = new FormData(); form.append('voice', audioBlob, 'recording.webm'); form.append('assignee_id', assigneeId || users.find(u => u.role === 'member')?.id || ''); form.append('voice_duration', String(recordingTime)); form.append('model', aiModel);
-      const res = await fetch('/api/tasks', { method: 'POST', body: form }); const data = await res.json().catch(() => ({}));
+      const form = new FormData();
+      form.append('voice', audioBlob, 'recording.webm');
+      if (assigneeId) form.append('assignee_id', assigneeId);
+      form.append('voice_duration', String(recordingTime));
+      form.append('model', aiModel);
+      const res = await fetch('/api/tasks', { method: 'POST', body: form });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to create task');
-      if (data.ai_error) setError(`Task saved, but transcription failed.`);
-      setAudioBlob(null); await fetchTasks(); if (data.task?.id) await loadTaskDetail(data.task.id);
+      if (user) await finishCreate(data, user);
+    } catch (e) { setError((e as Error).message); } finally { setProcessing(false); }
+  };
+  const createTypedTask = async () => {
+    if (!typedText.trim() || !assigneeId || processing) return;
+    setProcessing(true); setError(null); setNotice(null);
+    try {
+      const form = new FormData();
+      form.append('text', typedText.trim());
+      form.append('assignee_id', assigneeId);
+      form.append('priority', typedPriority);
+      if (typedDeadline) form.append('deadline', typedDeadline);
+      const res = await fetch('/api/tasks', { method: 'POST', body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to create reminder');
+      if (user) await finishCreate(data, user);
     } catch (e) { setError((e as Error).message); } finally { setProcessing(false); }
   };
 
@@ -157,6 +244,19 @@ export default function DashboardPage() {
 
   const loadTaskDetail = async (id: string) => { const r = await fetch(`/api/tasks/${id}`); const d = await r.json(); setSelectedTask(d.task); setReplies(d.replies || []); setMobileDetail(true); };
   const updateStatus = async (id: string, status: string) => { await fetch(`/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); fetchTasks(); if (selectedTask?.id === id) setSelectedTask(prev => prev ? { ...prev, status } : null); };
+  const reassignTask = async (id: string, nextAssigneeId: string) => {
+    if (!nextAssigneeId) return;
+    const assignee = users.find((u) => u.id === nextAssigneeId);
+    await fetch(`/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assignee_id: nextAssigneeId }) });
+    fetchTasks();
+    if (selectedTask?.id === id) {
+      setSelectedTask((prev) => prev ? { ...prev, assignee_id: nextAssigneeId, assignee_name: assignee?.name || prev.assignee_name } : null);
+    }
+    if (user?.role === 'member' && nextAssigneeId !== user.id && selectedTask?.id === id) {
+      setSelectedTask(null);
+      setMobileDetail(false);
+    }
+  };
   const deleteTask = async (id: string) => { await fetch(`/api/tasks/${id}`, { method: 'DELETE' }); if (selectedTask?.id === id) setSelectedTask(null); setConfirmDelete(null); fetchTasks(); };
   const retranscribe = async (id: string) => { setRetrying(true); setError(null);
     try { const r = await fetch(`/api/tasks/${id}/retranscribe`, { method: 'POST' }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'Retranscription failed'); setSelectedTask(d.task); await fetchTasks(); } catch (e) { setError((e as Error).message); } finally { setRetrying(false); }
@@ -179,6 +279,12 @@ export default function DashboardPage() {
 
   /* ── Helpers ── */
 
+  const audioModelLabel = (id: string) => ({
+    'ag/gemini-3.7-flash-high': 'Gemini 3.7 Flash',
+    'ag/gemini-3-flash': 'Gemini 3 Flash',
+    'ag/gemini-3.6-flash-medium': 'Gemini 3.6 Flash',
+    'ag/gemini-3-flash-agent': 'Gemini 3 Flash Agent',
+  } as Record<string, string>)[id] || id.replace(/^ag\//, '');
   const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : null;
   const dlStatus = (d: string | null): string | null => { if (!d) return null; const now = Date.now(), dl = new Date(d).getTime(), today = new Date().setHours(0,0,0,0); if (dl < today) return 'overdue'; if (dl < today + 86400000) return 'today'; if (dl < today + 2*86400000) return 'tomorrow'; return null; };
@@ -200,7 +306,7 @@ export default function DashboardPage() {
         <div className="flex items-start gap-2">
           <PriorityDot level={task.priority} />
           <div className="min-w-0 flex-1">
-            <p className="text-[12px] leading-snug text-zinc-200 line-clamp-2 font-medium">{task.title_id || task.title}</p>
+            <p className="text-[12px] leading-snug text-zinc-200 line-clamp-2 font-medium">{taskTitles(task, user.role).primary}</p>
             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
               {task.assignee_name && (
                 <span className="text-[10px] text-zinc-400 bg-zinc-800/70 border border-zinc-700/50 px-1.5 py-0.5 rounded-md font-medium">@{task.assignee_name}</span>
@@ -222,16 +328,22 @@ export default function DashboardPage() {
     );
   };
 
-  const renderDetailContent = (t: Task, pendingQ: string[]) => (
+  const renderDetailContent = (t: Task, pendingQ: string[]) => {
+    const heading = taskTitles(t, user.role);
+    return (
     <>
       {/* ── Title row ── */}
       <div className="flex items-start justify-between gap-4 mb-6">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-zinc-100 leading-snug">{t.title_id || t.title}</h2>
-          {t.title && t.title !== t.title_id && <p className="text-[13px] text-zinc-500 mt-0.5">{t.title}</p>}
+          <h2 className="text-lg font-semibold text-zinc-100 leading-snug">{heading.primary}</h2>
+          {heading.secondary && <p className="text-[13px] text-zinc-500 mt-0.5">{heading.secondary}</p>}
           <div className="flex items-center gap-2.5 mt-2 text-[12px] text-zinc-500 flex-wrap">
             <span>{t.boss_name} → {t.assignee_name}</span>
             {t.deadline && <span className={`font-medium ${dlClass(t.deadline)}`}>· Due {fmtDate(t.deadline)}</span>}
+          </div>
+          <div className="mt-2 max-w-[240px]">
+            <label className="block text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-1">Reassign</label>
+            <AssigneeSelect users={users} value={t.assignee_id} onChange={(id) => { void reassignTask(t.id, id); }} />
           </div>
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -258,8 +370,8 @@ export default function DashboardPage() {
 
       {/* ── Voice + Transcript ── */}
       <section className="card p-4 mb-4">
-        <h3 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-[0.12em] mb-3">Voice Note</h3>
-        <audio controls className="w-full h-[36px] mb-4 audio-styled" src={t.voice_path} preload="metadata"/>
+        <h3 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-[0.12em] mb-3">{t.voice_path ? 'Voice Note' : 'Reminder'}</h3>
+        {t.voice_path && <audio controls className="w-full h-[36px] mb-4 audio-styled" src={t.voice_path} preload="metadata"/>}
         {t.transcript ? (
           <>
             <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider mb-1">English</p>
@@ -371,82 +483,69 @@ export default function DashboardPage() {
         )}
       </div>
     </>
-  );
+    );
+  };
 
   /* ═══════════════════════════════════════ RENDER ═══════════════════════════════════════ */
 
   return (
     <div className="min-h-screen bg-[var(--bg)] flex flex-col text-[15px]">
 
-      {/* ═══════ HEADER ═══════ */}
-      <header className="h-14 flex items-center justify-between px-5 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0 select-none">
-        <div className="flex items-center gap-3">
-          <div className="w-7 h-7 rounded-md overflow-hidden flex items-center justify-center shadow-[0_2px_8px_rgb(99_102_241/0.3)]">
-            <img src="/logo.png" alt="BossNote" className="w-full h-full object-cover" />
-          </div>
-          <div>
-            <h1 className="text-[13px] font-semibold tracking-tight text-zinc-100">BossNote</h1>
-            <p className="text-[10px] text-zinc-600 leading-none mt-0.5">{user.name} <span className="text-zinc-700">·</span> {isBoss ? 'Boss' : 'Team'}</p>
-          </div>
-
-          {/* Counter pills in header */}
-          {(pendingCount > 0 || waitingCount > 0) && (
-            <div className="flex items-center gap-1.5 ml-4">
-              {pendingCount > 0 && <span className="px-2 py-0.5 bg-[var(--warning-soft)] text-amber-400 text-[10px] font-medium rounded-full">{pendingCount} question{pendingCount > 1 ? 's' : ''}</span>}
-              {waitingCount > 0 && <span className="px-2 py-0.5 bg-red-950/50 text-red-400 text-[10px] font-medium rounded-full">{waitingCount} stuck</span>}
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          {isBoss && (
-            <button onClick={() => window.location.href = '/dashboard/users'} className="text-[12px] text-zinc-400 hover:text-zinc-200 px-2.5 py-1.5 rounded-md hover:bg-zinc-800 transition-colors" title="Manage Users">Users</button>
-          )}
-          <button onClick={() => window.location.href = '/dashboard/account'} className="text-[12px] text-zinc-400 hover:text-zinc-200 px-2.5 py-1.5 rounded-md hover:bg-zinc-800 transition-colors" title="Account">Account</button>
-          {/* Desktop: inline New Task button */}
-          <div className="hidden sm:flex items-center gap-2">
-            <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
-              className="input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
-              <option value="ag/gemini-3-flash">Gemini 3 Flash</option>
-              <option value="ag/gemini-3.6-flash-medium">Gemini 3.6 Flash</option>
-              <option value="ag/gemini-3.5-flash-high">Gemini 3.5 Flash</option>
-              <option value="ag/gemini-3-flash-agent">Gemini 3 Flash Agent</option>
-            </select>
-            {isBoss && (
-              <button onClick={() => { setShowNewTask(true); setAudioBlob(null); setAudioUrl(null); }} className="h-8 px-3.5 inline-flex items-center gap-1.5 bg-gradient-to-b from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-[12px] font-medium rounded-md transition-all shadow-[0_1px_3px_rgb(99_102_241/0.25)] active:scale-[0.98]">
+      <DashboardHeader
+        user={user}
+        extra={
+          <>
+            <div className="hidden sm:flex items-center gap-2">
+              <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
+                className="input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
+                {modelOptions.map(id => <option key={id} value={id}>{audioModelLabel(id)}</option>)}
+              </select>
+              <button onClick={openNewTask} className="h-8 px-3.5 inline-flex items-center gap-1.5 bg-gradient-to-b from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-[12px] font-medium rounded-md transition-all shadow-[0_1px_3px_rgb(99_102_241/0.25)] active:scale-[0.98]">
                 <PlusIcon /> New Task
               </button>
-            )}
+            </div>
+            <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
+              className="sm:hidden input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
+              {modelOptions.map(id => <option key={id} value={id}>{audioModelLabel(id)}</option>)}
+            </select>
+          </>
+        }
+      >
+        {(pendingCount > 0 || waitingCount > 0) && (
+          <div className="flex items-center gap-1.5 ml-2 sm:ml-4">
+            {pendingCount > 0 && <span className="px-2 py-0.5 bg-[var(--warning-soft)] text-amber-400 text-[10px] font-medium rounded-full">{pendingCount} question{pendingCount > 1 ? 's' : ''}</span>}
+            {waitingCount > 0 && <span className="px-2 py-0.5 bg-red-950/50 text-red-400 text-[10px] font-medium rounded-full">{waitingCount} stuck</span>}
           </div>
-          {/* Mobile: model selector only (New Task moves to FAB) */}
-          <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
-            className="sm:hidden input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
-            <option value="ag/gemini-3-flash">Gemini 3 Flash</option>
-            <option value="ag/gemini-3.6-flash-medium">Gemini 3.6 Flash</option>
-            <option value="ag/gemini-3.5-flash-high">Gemini 3.5 Flash</option>
-            <option value="ag/gemini-3-flash-agent">Gemini 3 Flash Agent</option>
-          </select>
-        </div>
-      </header>
+        )}
+      </DashboardHeader>
 
-      {/* ═══════ MOBILE FAB ═══════ */}
-      {isBoss && (
-        <button onClick={() => { setShowNewTask(true); setAudioBlob(null); setAudioUrl(null); }}
-          className="sm:hidden fixed bottom-6 right-5 z-30 w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white flex items-center justify-center shadow-[0_4px_20px_rgb(99_102_241/0.45)] active:scale-95 transition-transform">
-          <PlusIcon />
-        </button>
-      )}
+      <button onClick={openNewTask}
+        className="sm:hidden fixed bottom-6 right-5 z-30 w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white flex items-center justify-center shadow-[0_4px_20px_rgb(99_102_241/0.45)] active:scale-95 transition-transform">
+        <PlusIcon />
+      </button>
+
+      <PushEnableBanner />
 
       {/* ═══════ BANNERS ═══════ */}
-      {processing && <div className="h-8 bg-violet-950/40 border-b border-violet-800/40 text-violet-300 text-[12px] flex items-center justify-center gap-2 flex-shrink-0"><span className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin"/>Processing voice note…</div>}
+      {processing && <div className="h-8 bg-violet-950/40 border-b border-violet-800/40 text-violet-300 text-[12px] flex items-center justify-center gap-2 flex-shrink-0"><span className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin"/>{createMode === 'typed' ? 'Saving reminder…' : 'Processing voice note…'}</div>}
       {error && <div className="bg-[var(--danger-soft)] border-b border-red-900/30 text-red-400 text-[12px] flex items-center px-4 py-2 flex-shrink-0"><AlertIcon /><span className="flex-1 ml-2">{error}</span><button onClick={() => setError(null)} className="text-red-500/70 hover:text-red-400 ml-3">Dismiss</button></div>}
+      {notice && <div className="bg-emerald-950/30 border-b border-emerald-900/30 text-emerald-400 text-[12px] flex items-center px-4 py-2 flex-shrink-0"><span className="flex-1">{notice}</span><button onClick={() => setNotice(null)} className="text-emerald-500/70 hover:text-emerald-400 ml-3">Dismiss</button></div>}
 
       {/* ═══════ TOOLBAR ═══════ */}
       <div className="h-11 flex items-center gap-2 px-4 border-b border-[var(--border)] bg-[var(--surface)] flex-shrink-0">
         {isBoss && (
           <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} className="input-field px-2.5 py-1 text-[12px] w-auto cursor-pointer">
             <option value="">Everyone</option>
-            {users.filter(u => u.role === 'member').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            {users.filter(u => u.role === 'member').length > 0 && (
+              <optgroup label="Staff">
+                {users.filter(u => u.role === 'member').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </optgroup>
+            )}
+            {users.filter(u => u.role === 'boss').length > 0 && (
+              <optgroup label="Boss">
+                {users.filter(u => u.role === 'boss').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </optgroup>
+            )}
           </select>
         )}
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="input-field px-2.5 py-1 text-[12px] w-auto cursor-pointer">
@@ -556,34 +655,78 @@ export default function DashboardPage() {
 
       </div>
 
-      {/* ═══════ RECORDING MODAL ═══════ */}
+      {/* ═══════ NEW TASK / REMINDER MODAL ═══════ */}
       {showNewTask && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-5" onClick={() => { setShowNewTask(false); stopRecording(); }}>
-          <div className="card-raised p-6 max-w-sm w-full bg-[var(--surface)]" onClick={e => e.stopPropagation()}>
-            <div className="text-center mb-6">
-              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 transition-all duration-300 ${recording ? 'bg-red-600 shadow-[0_0_24px_rgb(239_68_68/0.4)] scale-110' : 'bg-gradient-to-br from-violet-600 to-indigo-600 shadow-[0_4px_16px_rgb(99_102_241/0.3)]'}`}>
-                <MicIcon />
-              </div>
-              <h3 className="text-base font-semibold text-zinc-100">{!audioBlob ? (recording ? 'Recording…' : 'New Voice Task') : 'Review'}</h3>
-              <p className="text-[12px] text-zinc-500 mt-1">{!audioBlob ? (recording ? fmtTime(recordingTime) : 'Tap to speak') : `${fmtTime(recordingTime)} recorded`}</p>
+          <div className="card-raised p-6 max-w-sm w-full bg-[var(--surface)] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex rounded-lg bg-zinc-900 p-0.5 mb-4">
+              <button type="button" onClick={() => { setCreateMode('voice'); }}
+                className={`flex-1 py-1.5 rounded-md text-[12px] font-medium transition-colors ${createMode === 'voice' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500'}`}>Voice</button>
+              <button type="button" onClick={() => { setCreateMode('typed'); stopRecording(); }}
+                className={`flex-1 py-1.5 rounded-md text-[12px] font-medium transition-colors ${createMode === 'typed' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500'}`}>Type</button>
             </div>
-            {!audioBlob ? (
-              <button onClick={recording ? stopRecording : startRecording} className={`w-full py-2.5 rounded-lg text-[13px] font-medium transition-all duration-200 ${recording ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-[0_2px_8px_rgb(99_102_241/0.3)]'}`}>
-                {recording ? 'Stop Recording' : 'Start Recording'}
-              </button>
+
+            {createMode === 'voice' ? (
+              <>
+                <div className="text-center mb-5">
+                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 transition-all duration-300 ${recording ? 'bg-red-600 shadow-[0_0_24px_rgb(239_68_68/0.4)] scale-110' : 'bg-gradient-to-br from-violet-600 to-indigo-600 shadow-[0_4px_16px_rgb(99_102_241/0.3)]'}`}>
+                    <MicIcon />
+                  </div>
+                  <h3 className="text-base font-semibold text-zinc-100">{!audioBlob ? (recording ? 'Recording…' : 'New Voice Task') : 'Review'}</h3>
+                  <p className="text-[12px] text-zinc-500 mt-1">{!audioBlob ? (recording ? fmtTime(recordingTime) : 'Tap to speak — or switch to Type if the AI is down') : `${fmtTime(recordingTime)} recorded`}</p>
+                </div>
+                <div className="text-left mb-3">
+                  <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Override assignee (optional)</label>
+                  <AssigneeSelect users={users} value={assigneeId} onChange={setAssigneeId} includeAuto />
+                  <p className="text-[11px] text-zinc-600 mt-1.5 leading-relaxed">Leave on Auto so the voice note chooses staff or boss (Bayu, Sandra, Ian, …).</p>
+                </div>
+                {!audioBlob ? (
+                  <button onClick={recording ? stopRecording : startRecording} className={`w-full py-2.5 rounded-lg text-[13px] font-medium transition-all duration-200 ${recording ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-[0_2px_8px_rgb(99_102_241/0.3)]'}`}>
+                    {recording ? 'Stop Recording' : 'Start Recording'}
+                  </button>
+                ) : (
+                  <div className="space-y-3">
+                    <audio controls className="w-full h-9 audio-styled" src={audioBlob ? URL.createObjectURL(audioBlob) : ''}/>
+                    <div className="flex gap-2">
+                      <button onClick={createTask} className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">Create Task</button>
+                      <button onClick={() => { setAudioBlob(null); setRecordingTime(0); }} className="px-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded-lg text-[13px] transition-colors">Re-record</button>
+                    </div>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="space-y-3">
+                <div className="text-center mb-2">
+                  <h3 className="text-base font-semibold text-zinc-100">Type reminder</h3>
+                  <p className="text-[12px] text-zinc-500 mt-1">No AI — saved as a task immediately.</p>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Reminder text</label>
+                  <textarea value={typedText} onChange={e => setTypedText(e.target.value)} rows={4} placeholder="Remind Ian to review the proposal tomorrow"
+                    className="input-field px-2.5 py-2 text-[13px] w-full resize-none" />
+                </div>
                 <div>
                   <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Assign to</label>
-                  <select value={assigneeId} onChange={e => setAssigneeId(e.target.value)} className="input-field px-2.5 py-2 text-[13px] w-full cursor-pointer">
-                    {users.filter(u => u.role === 'member').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                  </select>
+                  <AssigneeSelect users={users} value={assigneeId} onChange={setAssigneeId} />
                 </div>
-                <audio controls className="w-full h-9 audio-styled" src={audioBlob ? URL.createObjectURL(audioBlob) : ''}/>
-                <div className="flex gap-2">
-                  <button onClick={createTask} className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">Create Task</button>
-                  <button onClick={() => { setAudioBlob(null); setRecordingTime(0); }} className="px-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded-lg text-[13px] transition-colors">Re-record</button>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Priority</label>
+                    <select value={typedPriority} onChange={e => setTypedPriority(e.target.value)} className="input-field px-2.5 py-2 text-[13px] w-full cursor-pointer">
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Deadline</label>
+                    <input type="date" value={typedDeadline} onChange={e => setTypedDeadline(e.target.value)} className="input-field px-2.5 py-2 text-[13px] w-full" />
+                  </div>
                 </div>
+                <button onClick={createTypedTask} disabled={!typedText.trim() || !assigneeId || processing}
+                  className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">
+                  Create Reminder
+                </button>
               </div>
             )}
             <button onClick={() => { setShowNewTask(false); stopRecording(); }} className="w-full mt-3 text-[12px] text-zinc-600 hover:text-zinc-400 py-1.5 transition-colors">Cancel</button>
@@ -600,7 +743,7 @@ export default function DashboardPage() {
             </div>
             <h3 className="text-base font-semibold text-center text-zinc-100">Delete this task?</h3>
             <p className="text-[13px] text-zinc-500 text-center mt-1.5 leading-relaxed">
-              <span className="text-zinc-300 font-medium truncate block">{confirmDelete.title_id || confirmDelete.title}</span>
+              <span className="text-zinc-300 font-medium truncate block">{taskTitles(confirmDelete, user.role).primary}</span>
               This action cannot be undone.
             </p>
             <div className="flex gap-2.5 mt-5">

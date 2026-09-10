@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { queryAll, queryOne, execute } from '@/lib/database';
-import { processVoiceNote, getUserModel } from '@/lib/ai';
+import { processVoiceNote, getUserModel, normalizeAudioModel } from '@/lib/ai';
+import { resolveAssigneeFromHint } from '@/lib/assignee';
+import { buildTypedTaskFields } from '@/lib/typed-task';
+import { sendPushToUser } from '@/lib/push';
 import { saveVoice, voiceExt } from '@/lib/voice-storage';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -58,45 +61,174 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ tasks });
 }
 
+type CreateInput = {
+  voiceFile: File | null;
+  formAssigneeId: string;
+  typedText: string;
+  typedTitle: string;
+  typedPriority: string;
+  typedDeadline: string;
+  modelRaw: string;
+  voiceDurationRaw: string;
+};
+
+async function readCreateInput(request: NextRequest): Promise<CreateInput> {
+  const contentType = request.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+    return {
+      voiceFile: null,
+      formAssigneeId: String(body.assignee_id ?? '').trim(),
+      typedText: String(body.text ?? '').trim(),
+      typedTitle: String(body.title ?? '').trim(),
+      typedPriority: String(body.priority ?? '').trim(),
+      typedDeadline: String(body.deadline ?? '').trim(),
+      modelRaw: String(body.model ?? ''),
+      voiceDurationRaw: '',
+    };
+  }
+
+  const formData = await request.formData();
+  const voice = formData.get('voice');
+  const voiceFile = voice instanceof File && voice.size > 0 ? voice : null;
+  return {
+    voiceFile,
+    formAssigneeId: String(formData.get('assignee_id') ?? '').trim(),
+    typedText: String(formData.get('text') ?? '').trim(),
+    typedTitle: String(formData.get('title') ?? '').trim(),
+    typedPriority: String(formData.get('priority') ?? '').trim(),
+    typedDeadline: String(formData.get('deadline') ?? '').trim(),
+    modelRaw: String(formData.get('model') ?? ''),
+    voiceDurationRaw: String(formData.get('voice_duration') ?? ''),
+  };
+}
+
+async function loadCreatedTask(taskId: string) {
+  return queryOne(
+    `SELECT t.*, bu.name as boss_name, au.name as assignee_name, 0 as reply_count
+     FROM tasks t JOIN users bu ON t.created_by = bu.id JOIN users au ON t.assignee_id = au.id
+     WHERE t.id = ?`,
+    [taskId],
+  );
+}
+
+function notifyAssignee(assigneeId: string, title: string) {
+  void sendPushToUser(assigneeId, {
+    title: 'New task',
+    body: title,
+    url: '/dashboard',
+  }).catch((err) => {
+    console.error('[bossnote] push after create failed:', err);
+  });
+}
+
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (user.role !== 'boss') return NextResponse.json({ error: 'Only boss can create tasks' }, { status: 403 });
 
-  const formData = await request.formData();
-  const voiceFile = formData.get('voice') as File | null;
-  const assigneeId = formData.get('assignee_id') as string;
+  const input = await readCreateInput(request);
+  const team = await queryAll<{ id: string; name: string }>(
+    'SELECT id, name FROM users ORDER BY name',
+  );
 
-  if (!voiceFile) return NextResponse.json({ error: 'Voice recording is required' }, { status: 400 });
-  if (!assigneeId) return NextResponse.json({ error: 'Assignee is required' }, { status: 400 });
+  // Typed path: no voice, no LLM. Works even when Gemini is down.
+  if (!input.voiceFile) {
+    const fields = buildTypedTaskFields({
+      text: input.typedText,
+      title: input.typedTitle,
+      priority: input.typedPriority,
+      deadline: input.typedDeadline,
+    });
+    if (!fields) {
+      return NextResponse.json(
+        { error: 'Voice recording or reminder text is required' },
+        { status: 400 },
+      );
+    }
 
-  const assignee = await queryOne('SELECT id FROM users WHERE id = ?', [assigneeId]);
-  if (!assignee) return NextResponse.json({ error: 'Assignee not found' }, { status: 400 });
+    const formUser = input.formAssigneeId
+      ? team.find((u) => u.id === input.formAssigneeId)
+      : undefined;
+    if (!formUser) {
+      return NextResponse.json({ error: 'Assignee is required' }, { status: 400 });
+    }
 
-  const model = (formData.get('model') as string) || (await getUserModel(user.id));
-  const taskId = uuidv4();
-  const buffer = Buffer.from(await voiceFile.arrayBuffer());
+    const taskId = uuidv4();
+    await execute(
+      `INSERT INTO tasks
+         (id, title, title_id, description, transcript, transcript_id,
+          summary, summary_id, steps, steps_id, deliverables, deliverables_id,
+          questions, questions_id,
+          assignee_id, created_by, priority, status, deadline, voice_path, voice_duration, ai_error)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?, ?, 'todo', ?, ?, ?, ?)`,
+      [
+        taskId,
+        fields.title,
+        fields.title_id,
+        fields.summary,
+        fields.transcript,
+        fields.transcript_id,
+        fields.summary,
+        fields.summary_id,
+        JSON.stringify([]),
+        JSON.stringify([]),
+        JSON.stringify([]),
+        JSON.stringify([]),
+        JSON.stringify([]),
+        JSON.stringify([]),
+        formUser.id,
+        user.id,
+        fields.priority,
+        fields.deadline,
+        null,
+        null,
+        null,
+      ],
+    );
 
-  let voicePath: string;
-  try {
-    voicePath = saveVoice(taskId, buffer, voiceExt(voiceFile));
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    const task = await loadCreatedTask(taskId);
+    notifyAssignee(formUser.id, fields.title || fields.title_id);
+    return NextResponse.json({ task, ai_error: null, ok: true }, { status: 201 });
   }
 
-  const durationRaw = Number(formData.get('voice_duration'));
+  const model = normalizeAudioModel(input.modelRaw || (await getUserModel(user.id)));
+  const taskId = uuidv4();
+  const buffer = Buffer.from(await input.voiceFile.arrayBuffer());
+
+  const durationRaw = Number(input.voiceDurationRaw);
   const voiceDuration = Number.isFinite(durationRaw) && durationRaw > 0 ? Math.round(durationRaw) : null;
 
-  // Transcribe + structure in one call. On failure the voice note is still saved,
-  // but ai_error is recorded so the UI can show why and offer a retry.
   let ai;
   let aiError: string | null = null;
   try {
-    ai = await processVoiceNote(buffer.toString('base64'), voiceFile.type, model);
+    ai = await processVoiceNote(buffer.toString('base64'), input.voiceFile.type, model);
   } catch (e) {
     aiError = (e as Error).message;
     console.error('[bossnote] AI pipeline failed:', aiError);
   }
+
+  const fromVoice = resolveAssigneeFromHint(ai?.assignee_hint, team);
+  const formUser = input.formAssigneeId
+    ? team.find((u) => u.id === input.formAssigneeId)
+    : undefined;
+  const assigneeId = fromVoice?.id || formUser?.id;
+
+  if (!assigneeId) {
+    return NextResponse.json(
+      { error: 'Could not tell who this task is for from the voice note. Pick an assignee and try again.' },
+      { status: 400 },
+    );
+  }
+
+  let voicePath: string;
+  try {
+    voicePath = saveVoice(taskId, buffer, voiceExt(input.voiceFile));
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+  }
+
+  const title = ai?.title ?? 'Voice note — not transcribed yet';
+  const titleId = ai?.title_id ?? 'Voice note — not transcribed yet';
 
   await execute(
     `INSERT INTO tasks
@@ -107,8 +239,8 @@ export async function POST(request: NextRequest) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?, ?, 'todo', ?, ?, ?, ?)`,
     [
       taskId,
-      ai?.title ?? 'Voice note — not transcribed yet',
-      ai?.title_id ?? 'Voice note — belum ditranskrip',
+      title,
+      titleId,
       ai?.summary ?? '',
       ai?.transcript ?? '',
       ai?.transcript_id ?? '',
@@ -130,12 +262,7 @@ export async function POST(request: NextRequest) {
     ],
   );
 
-  const task = await queryOne(
-    `SELECT t.*, bu.name as boss_name, au.name as assignee_name, 0 as reply_count
-     FROM tasks t JOIN users bu ON t.created_by = bu.id JOIN users au ON t.assignee_id = au.id
-     WHERE t.id = ?`,
-    [taskId],
-  );
-
+  const task = await loadCreatedTask(taskId);
+  notifyAssignee(assigneeId, title || titleId);
   return NextResponse.json({ task, ai_error: aiError, ok: true }, { status: 201 });
 }

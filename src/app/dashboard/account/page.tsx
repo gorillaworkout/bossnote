@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { DashboardHeader } from '@/components/DashboardHeader';
 
 interface User { id: string; name: string; role: string }
 interface Me { id: string; name: string; role: string }
@@ -19,8 +19,6 @@ export default function AccountPage() {
 
   const [targetId, setTargetId] = useState('');
   const [targetPw, setTargetPw] = useState('');
-
-  const router = useRouter();
 
   useEffect(() => {
     fetch('/api/auth/me').then(r => r.json()).then(d => {
@@ -74,15 +72,13 @@ export default function AccountPage() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)] flex flex-col">
-      <header className="h-14 flex items-center justify-between px-5 bg-[var(--surface)] border-b border-[var(--border)]">
-        <div className="flex items-center gap-3">
-          <div className="w-7 h-7 rounded-md overflow-hidden"><img src="/logo.png" className="w-full h-full object-cover" /></div>
-          <h1 className="text-[13px] font-semibold text-zinc-100">Account</h1>
-        </div>
-        <button onClick={() => router.push('/dashboard')} className="text-[12px] text-zinc-400 hover:text-zinc-200 px-2.5 py-1.5 rounded-md hover:bg-zinc-800 transition-colors">← Back to board</button>
-      </header>
+      <DashboardHeader user={me} />
 
       <main className="flex-1 max-w-[520px] w-full mx-auto p-5 space-y-5">
+        <div>
+          <h2 className="text-[15px] font-semibold text-zinc-100">Account</h2>
+          <p className="text-[12px] text-zinc-500 mt-0.5">{isBoss ? 'Update your password or reset a teammate password.' : 'Update your password.'}</p>
+        </div>
         {msg && (
           <div className={`text-[12px] px-3 py-2 rounded-md border ${msg.ok ? 'bg-emerald-950/30 border-emerald-900/40 text-emerald-400' : 'bg-red-950/30 border-red-900/30 text-red-400'}`}>{msg.text}</div>
         )}
