@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { PushEnableBanner } from '@/components/PushEnableBanner';
+import { VoicePlayer } from '@/components/VoicePlayer';
 import { taskTitles } from '@/lib/task-title';
 
 /* ── Types ── */
@@ -371,7 +372,7 @@ export default function DashboardPage() {
       {/* ── Voice + Transcript ── */}
       <section className="card p-4 mb-4">
         <h3 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-[0.12em] mb-3">{t.voice_path ? 'Voice Note' : 'Reminder'}</h3>
-        {t.voice_path && <audio controls className="w-full h-[36px] mb-4 audio-styled" src={t.voice_path} preload="metadata"/>}
+        {t.voice_path && <VoicePlayer className="w-full h-[36px] mb-4 audio-styled" src={t.voice_path} />}
         {t.transcript ? (
           <>
             <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider mb-1">English</p>
@@ -462,7 +463,7 @@ export default function DashboardPage() {
           {replies.map(r => (
             <div key={r.id} className="card p-3 mb-3 ml-4">
               <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider mb-2">{r.user_name} · {new Date(r.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</p>
-              <audio controls className="w-full h-[32px] mb-2 audio-styled" src={r.voice_path} preload="metadata"/>
+              <VoicePlayer className="w-full h-[32px] mb-2 audio-styled" src={r.voice_path} />
               {r.transcript && r.transcript !== 'Voice reply' && <p className="text-[13px] text-zinc-400 leading-relaxed whitespace-pre-wrap">{r.transcript}</p>}
             </div>
           ))}
