@@ -5,6 +5,7 @@ import { DashboardHeader } from '@/components/DashboardHeader';
 import { PushEnableBanner } from '@/components/PushEnableBanner';
 import { VoicePlayer } from '@/components/VoicePlayer';
 import { taskTitles } from '@/lib/task-title';
+import { isAssigneeRequiredError } from '@/lib/assignee';
 
 /* ── Types ── */
 
@@ -107,6 +108,62 @@ function AssigneeSelect({
   );
 }
 
+function AssigneePickModal({
+  users,
+  busy,
+  onPick,
+  onBack,
+}: {
+  users: User[];
+  busy: boolean;
+  onPick: (id: string) => void;
+  onBack: () => void;
+}) {
+  const staff = users.filter((u) => u.role === 'member');
+  const bosses = users.filter((u) => u.role === 'boss');
+  const renderGroup = (label: string, list: User[]) => (
+    list.length === 0 ? null : (
+      <div className="mb-3">
+        <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-1.5">{label}</p>
+        <div className="space-y-1.5">
+          {list.map((u) => (
+            <button
+              key={u.id}
+              type="button"
+              disabled={busy}
+              onClick={() => onPick(u.id)}
+              className="w-full text-left px-3 py-2.5 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-100 text-[13px] font-medium transition-colors disabled:opacity-40"
+            >
+              {u.name}
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  );
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-5" onClick={onBack}>
+      <div className="card-raised p-6 max-w-sm w-full bg-[var(--surface)] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-base font-semibold text-zinc-100">Who is this task for?</h3>
+        <p className="text-[12px] text-zinc-500 mt-1.5 leading-relaxed mb-4">
+          We couldn&apos;t tell from the voice note. Pick a teammate — your recording is kept.
+        </p>
+        {users.length === 0 ? (
+          <p className="text-[13px] text-zinc-500 mb-3">No teammates loaded. Try again in a moment.</p>
+        ) : (
+          <>
+            {renderGroup('Staff', staff)}
+            {renderGroup('Boss', bosses)}
+          </>
+        )}
+        <button type="button" onClick={onBack} disabled={busy} className="w-full mt-2 text-[12px] text-zinc-600 hover:text-zinc-400 py-1.5 disabled:opacity-40">
+          Back
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ── Main page ── */
 
 export default function DashboardPage() {
@@ -127,6 +184,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [assigneeId, setAssigneeId] = useState('');
+  const [needAssignee, setNeedAssignee] = useState(false);
   const [createMode, setCreateMode] = useState<'voice' | 'typed'>('voice');
   const [typedText, setTypedText] = useState('');
   const [typedPriority, setTypedPriority] = useState('medium');
@@ -194,6 +252,7 @@ export default function DashboardPage() {
     setAudioBlob(null);
     setAudioUrl(null);
     setAssigneeId('');
+    setNeedAssignee(false);
     setCreateMode('voice');
     setTypedText('');
     setTypedPriority('medium');
@@ -203,6 +262,7 @@ export default function DashboardPage() {
     setShowNewTask(false);
     setAudioBlob(null);
     setAssigneeId('');
+    setNeedAssignee(false);
     setTypedText('');
     if (data.ai_error) setError('Task saved, but transcription failed.');
     else if (data.task?.assignee_name) setNotice(`Assigned to ${data.task.assignee_name}.`);
@@ -210,18 +270,27 @@ export default function DashboardPage() {
     const canOpen = data.task?.id && (currentUser.role === 'boss' || data.task.assignee_id === currentUser.id);
     if (canOpen && data.task?.id) await loadTaskDetail(data.task.id);
   };
-  const createTask = async () => {
+  const createTask = async (overrideAssigneeId?: string) => {
     if (!audioBlob || processing) return;
+    const chosenAssignee = (typeof overrideAssigneeId === 'string' ? overrideAssigneeId : assigneeId).trim();
+    if (typeof overrideAssigneeId === 'string' && chosenAssignee) setAssigneeId(chosenAssignee);
     setProcessing(true); setError(null); setNotice(null);
     try {
       const form = new FormData();
       form.append('voice', audioBlob, 'recording.webm');
-      if (assigneeId) form.append('assignee_id', assigneeId);
+      if (chosenAssignee) form.append('assignee_id', chosenAssignee);
       form.append('voice_duration', String(recordingTime));
       form.append('model', aiModel);
       const res = await fetch('/api/tasks', { method: 'POST', body: form });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Failed to create task');
+      if (!res.ok) {
+        if (isAssigneeRequiredError(data)) {
+          setNeedAssignee(true);
+          return;
+        }
+        throw new Error(data.error || 'Failed to create task');
+      }
+      setNeedAssignee(false);
       if (user) await finishCreate(data, user);
     } catch (e) { setError((e as Error).message); } finally { setProcessing(false); }
   };
@@ -658,7 +727,7 @@ export default function DashboardPage() {
 
       {/* ═══════ NEW TASK / REMINDER MODAL ═══════ */}
       {showNewTask && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-5" onClick={() => { setShowNewTask(false); stopRecording(); }}>
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-5" onClick={() => { setShowNewTask(false); setNeedAssignee(false); stopRecording(); }}>
           <div className="card-raised p-6 max-w-sm w-full bg-[var(--surface)] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex rounded-lg bg-zinc-900 p-0.5 mb-4">
               <button type="button" onClick={() => { setCreateMode('voice'); }}
@@ -677,9 +746,9 @@ export default function DashboardPage() {
                   <p className="text-[12px] text-zinc-500 mt-1">{!audioBlob ? (recording ? fmtTime(recordingTime) : 'Tap to speak — or switch to Type if the AI is down') : `${fmtTime(recordingTime)} recorded`}</p>
                 </div>
                 <div className="text-left mb-3">
-                  <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Override assignee (optional)</label>
-                  <AssigneeSelect users={users} value={assigneeId} onChange={setAssigneeId} includeAuto />
-                  <p className="text-[11px] text-zinc-600 mt-1.5 leading-relaxed">Leave on Auto so the voice note chooses staff or boss (Bayu, Sandra, Ian, …).</p>
+                  <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Assign to (optional)</label>
+                  <AssigneeSelect users={users} value={assigneeId} onChange={setAssigneeId} includeAuto autoLabel="Auto from voice" />
+                  <p className="text-[11px] text-zinc-600 mt-1.5 leading-relaxed">Optional. If the voice note does not name anyone, we will ask who it is for.</p>
                 </div>
                 {!audioBlob ? (
                   <button onClick={recording ? stopRecording : startRecording} className={`w-full py-2.5 rounded-lg text-[13px] font-medium transition-all duration-200 ${recording ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-[0_2px_8px_rgb(99_102_241/0.3)]'}`}>
@@ -689,7 +758,7 @@ export default function DashboardPage() {
                   <div className="space-y-3">
                     <audio controls className="w-full h-9 audio-styled" src={audioBlob ? URL.createObjectURL(audioBlob) : ''}/>
                     <div className="flex gap-2">
-                      <button onClick={createTask} className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">Create Task</button>
+                      <button onClick={() => { void createTask(); }} className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">Create Task</button>
                       <button onClick={() => { setAudioBlob(null); setRecordingTime(0); }} className="px-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded-lg text-[13px] transition-colors">Re-record</button>
                     </div>
                   </div>
@@ -730,9 +799,18 @@ export default function DashboardPage() {
                 </button>
               </div>
             )}
-            <button onClick={() => { setShowNewTask(false); stopRecording(); }} className="w-full mt-3 text-[12px] text-zinc-600 hover:text-zinc-400 py-1.5 transition-colors">Cancel</button>
+            <button onClick={() => { setShowNewTask(false); setNeedAssignee(false); stopRecording(); }} className="w-full mt-3 text-[12px] text-zinc-600 hover:text-zinc-400 py-1.5 transition-colors">Cancel</button>
           </div>
         </div>
+      )}
+
+      {needAssignee && (
+        <AssigneePickModal
+          users={users}
+          busy={processing}
+          onPick={(id) => { void createTask(id); }}
+          onBack={() => setNeedAssignee(false)}
+        />
       )}
 
       {/* ═══════ DELETE CONFIRMATION MODAL ═══════ */}

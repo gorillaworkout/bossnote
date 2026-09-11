@@ -1,4 +1,4 @@
-const CACHE = 'bossnote-v7';
+const CACHE = 'bossnote-v8';
 const ASSETS = ['/logo.png'];
 
 self.addEventListener('install', (e) => {
@@ -20,6 +20,9 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
+  // Cache API only supports http(s). chrome-extension:// (and other schemes)
+  // throw on Cache.put and show up as SW console noise.
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
   // Network-only: never intercept /api/, document navigations, or the manifest.
   // respondWith(fetch(request)) can drop cookies on media/Range GETs and some
   // navigations → 401 / forced re-login when the PWA or tab is reopened.
@@ -29,10 +32,17 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname === '/manifest.json') return;
   e.respondWith((async () => {
     const match = await caches.match(e.request);
-    return match || fetch(e.request).then(res => {
-      if (res.ok) { const clone = res.clone(); caches.open(CACHE).then(c => c.put(e.request, clone)); }
+    if (match) return match;
+    try {
+      const res = await fetch(e.request);
+      if (res.ok) {
+        const clone = res.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, clone)).catch(() => {});
+      }
       return res;
-    });
+    } catch (err) {
+      throw err;
+    }
   })());
 });
 
