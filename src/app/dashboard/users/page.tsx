@@ -57,7 +57,7 @@ export default function ManageUsersPage() {
     let cancelled = false;
     (async () => {
       try {
-        const d = await fetch('/api/auth/me').then(r => r.json());
+        const d = await fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' }).then(r => r.json());
         if (cancelled) return;
         if (!d.user) {
           window.location.assign(`${window.location.origin}/`);

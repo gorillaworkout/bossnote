@@ -1,4 +1,4 @@
-const CACHE = 'bossnote-v6';
+const CACHE = 'bossnote-v7';
 const ASSETS = ['/logo.png'];
 
 self.addEventListener('install', (e) => {
@@ -20,20 +20,14 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-  // Network-only: never intercept /api/ (especially /api/voice/).
-  // respondWith(fetch(request)) can drop cookies on media/Range GETs → 401.
-  // Leaving the request unhandled keeps credentialed same-origin fetches intact.
+  // Network-only: never intercept /api/, document navigations, or the manifest.
+  // respondWith(fetch(request)) can drop cookies on media/Range GETs and some
+  // navigations → 401 / forced re-login when the PWA or tab is reopened.
+  // Leaving those requests unhandled keeps credentialed same-origin fetches intact.
   if (url.pathname.startsWith('/api/')) return;
-  const isNavigate = e.request.mode === 'navigate';
+  if (e.request.mode === 'navigate') return;
+  if (url.pathname === '/manifest.json') return;
   e.respondWith((async () => {
-    if (isNavigate) {
-      try {
-        return await fetch(e.request);
-      } catch {
-        const match = await caches.match(e.request);
-        return match || new Response(null, { status: 504 });
-      }
-    }
     const match = await caches.match(e.request);
     return match || fetch(e.request).then(res => {
       if (res.ok) { const clone = res.clone(); caches.open(CACHE).then(c => c.put(e.request, clone)); }

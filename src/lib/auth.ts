@@ -1,42 +1,29 @@
-import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
-import type { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { queryOne } from '@/lib/database';
+import { COOKIE_NAME, toSessionUser, verifySessionToken, type SessionUser } from '@/lib/session';
 
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'bossnote-dev-secret-change-in-production');
-const COOKIE_NAME = 'bn_token';
-const SESSION_MAX_AGE = 60 * 60 * 24 * 90; // 90 days
-
-const SESSION_COOKIE = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
-  path: '/',
-};
-
-export interface SessionUser {
-  id: string;
-  email: string;
-  name: string;
-  role: 'boss' | 'member';
-}
-
-export async function createSession(user: SessionUser): Promise<string> {
-  return new SignJWT({ ...user })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setExpirationTime('90d')
-    .sign(JWT_SECRET);
-}
+export type { SessionUser } from '@/lib/session';
+export {
+  COOKIE_NAME,
+  SESSION_MAX_AGE,
+  clearSessionCookie,
+  clearSessionCookieOptions,
+  createSession,
+  jwtSecretBytes,
+  refreshSessionCookie,
+  sessionCookieOptions,
+  setSessionCookie,
+  toSessionUser,
+  verifySessionToken,
+} from '@/lib/session';
 
 export async function getSession(): Promise<SessionUser | null> {
   try {
     const cookieStore = await cookies();
     const token = cookieStore.get(COOKIE_NAME)?.value;
     if (!token) return null;
-
-    const { payload } = await jwtVerify(token, JWT_SECRET);
-    return payload as unknown as SessionUser;
+    return verifySessionToken(token);
   } catch {
     return null;
   }
@@ -52,12 +39,12 @@ export async function login(username: string, password: string): Promise<Session
   const valid = await bcrypt.compare(password, user.password_hash);
   if (!valid) return null;
 
-  return {
+  return toSessionUser({
     id: user.id,
     email: user.email,
     name: user.name,
     role: user.role as 'boss' | 'member',
-  };
+  });
 }
 
 export async function getUsers(): Promise<SessionUser[]> {
@@ -66,21 +53,10 @@ export async function getUsers(): Promise<SessionUser[]> {
       'SELECT id, email, name, role FROM users ORDER BY name',
     ),
   );
-  return rows.map(r => ({ id: r.id, email: r.email, name: r.name, role: r.role as 'boss' | 'member' }));
+  return rows.map(r => toSessionUser({
+    id: r.id,
+    email: r.email,
+    name: r.name,
+    role: r.role as 'boss' | 'member',
+  }));
 }
-
-export function setSessionCookie(response: NextResponse, token: string) {
-  response.cookies.set(COOKIE_NAME, token, {
-    ...SESSION_COOKIE,
-    maxAge: SESSION_MAX_AGE,
-  });
-}
-
-export function clearSessionCookie(response: NextResponse) {
-  response.cookies.set(COOKIE_NAME, '', {
-    ...SESSION_COOKIE,
-    maxAge: 0,
-  });
-}
-
-export { COOKIE_NAME };

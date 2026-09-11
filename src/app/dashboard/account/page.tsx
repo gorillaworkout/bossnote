@@ -21,7 +21,7 @@ export default function AccountPage() {
   const [targetPw, setTargetPw] = useState('');
 
   useEffect(() => {
-    fetch('/api/auth/me').then(r => r.json()).then(d => {
+    fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' }).then(r => r.json()).then(d => {
       if (!d.user) { window.location.href = '/'; return; }
       setMe(d.user);
     }).finally(() => setLoading(false));

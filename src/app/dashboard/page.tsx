@@ -160,7 +160,7 @@ export default function DashboardPage() {
   }, [filterAssignee, filterStatus, searchQuery]);
 
   useEffect(() => {
-    fetch('/api/auth/me').then(r => r.json()).then(d => {
+    fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' }).then(r => r.json()).then(d => {
       if (!d.user) { window.location.href = '/'; return; }
       setUser(d.user);
       fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users || []));
