@@ -4,16 +4,9 @@ import type { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { queryOne } from '@/lib/database';
 
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'bossnote-dev-secret-change-in-production');
 const COOKIE_NAME = 'bn_token';
 const SESSION_MAX_AGE = 60 * 60 * 24 * 90; // 90 days
-
-const SESSION_COOKIE = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
-  path: '/',
-};
+const DEV_JWT_SECRET = 'bossnote-dev-secret-change-in-production';
 
 export interface SessionUser {
   id: string;
@@ -22,11 +15,69 @@ export interface SessionUser {
   role: 'boss' | 'member';
 }
 
+export type SessionCookieOptions = {
+  httpOnly: true;
+  secure: boolean;
+  sameSite: 'lax';
+  path: '/';
+  maxAge: number;
+  expires: Date;
+  priority: 'high';
+};
+
+/** Dynamic env read — avoids build-time inlining of process.env.JWT_SECRET. */
+export function jwtSecretBytes(): Uint8Array {
+  const raw = process.env['JWT_SECRET'] || DEV_JWT_SECRET;
+  return new TextEncoder().encode(raw);
+}
+
+export function toSessionUser(user: SessionUser): SessionUser {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role === 'boss' ? 'boss' : 'member',
+  };
+}
+
+export function sessionCookieOptions(maxAge = SESSION_MAX_AGE): SessionCookieOptions {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge,
+    expires: new Date(Date.now() + maxAge * 1000),
+    priority: 'high',
+  };
+}
+
+export function clearSessionCookieOptions(): SessionCookieOptions {
+  return {
+    ...sessionCookieOptions(0),
+    expires: new Date(0),
+  };
+}
+
 export async function createSession(user: SessionUser): Promise<string> {
-  return new SignJWT({ ...user })
+  const session = toSessionUser(user);
+  return new SignJWT({ ...session })
     .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
     .setExpirationTime('90d')
-    .sign(JWT_SECRET);
+    .sign(jwtSecretBytes());
+}
+
+export async function verifySessionToken(token: string): Promise<SessionUser | null> {
+  try {
+    const { payload } = await jwtVerify(token, jwtSecretBytes());
+    if (typeof payload.id !== 'string' || typeof payload.email !== 'string' || typeof payload.name !== 'string') {
+      return null;
+    }
+    return toSessionUser(payload as unknown as SessionUser);
+  } catch {
+    return null;
+  }
 }
 
 export async function getSession(): Promise<SessionUser | null> {
@@ -34,9 +85,7 @@ export async function getSession(): Promise<SessionUser | null> {
     const cookieStore = await cookies();
     const token = cookieStore.get(COOKIE_NAME)?.value;
     if (!token) return null;
-
-    const { payload } = await jwtVerify(token, JWT_SECRET);
-    return payload as unknown as SessionUser;
+    return verifySessionToken(token);
   } catch {
     return null;
   }
@@ -70,17 +119,16 @@ export async function getUsers(): Promise<SessionUser[]> {
 }
 
 export function setSessionCookie(response: NextResponse, token: string) {
-  response.cookies.set(COOKIE_NAME, token, {
-    ...SESSION_COOKIE,
-    maxAge: SESSION_MAX_AGE,
-  });
+  response.cookies.set(COOKIE_NAME, token, sessionCookieOptions());
 }
 
 export function clearSessionCookie(response: NextResponse) {
-  response.cookies.set(COOKIE_NAME, '', {
-    ...SESSION_COOKIE,
-    maxAge: 0,
-  });
+  response.cookies.set(COOKIE_NAME, '', clearSessionCookieOptions());
 }
 
-export { COOKIE_NAME };
+export async function refreshSessionCookie(response: NextResponse, user: SessionUser) {
+  const token = await createSession(user);
+  setSessionCookie(response, token);
+}
+
+export { COOKIE_NAME, SESSION_MAX_AGE };

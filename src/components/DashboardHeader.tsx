@@ -7,7 +7,7 @@ export type HeaderUser = { id: string; name: string; role: string };
 
 export async function logout() {
   try {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include', cache: 'no-store' });
   } finally {
     window.location.assign(`${window.location.origin}/`);
   }
