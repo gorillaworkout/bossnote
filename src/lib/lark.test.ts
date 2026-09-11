@@ -71,12 +71,14 @@ describe('buildTaskNotifyText', () => {
     process.env.BOSSNOTE_URL = 'https://bossnote.example';
     const text = buildTaskNotifyText({
       title: 'Review deck',
+      creatorName: 'Bayu',
+      creatorId: 'bayu-001',
       assigneeName: 'Ian',
       priority: 'high',
     });
     assert.equal(
       text,
-      'New task: Review deck\nAssignee: Ian\nPriority: high\nhttps://bossnote.example',
+      'New task: Review deck\nFrom: Bayu\nAssignee: Ian\nPriority: high\nhttps://bossnote.example',
     );
   });
 
@@ -86,10 +88,26 @@ describe('buildTaskNotifyText', () => {
     delete process.env.NEXT_PUBLIC_APP_URL;
     const text = buildTaskNotifyText({
       title: 'Follow up vendor',
+      creatorName: 'Sandra',
       assigneeName: 'Bayu',
       kind: 'reassign',
     });
-    assert.equal(text, 'Task reassigned: Follow up vendor\nAssignee: Bayu\nPriority: medium');
+    assert.equal(
+      text,
+      'Task reassigned: Follow up vendor\nFrom: Sandra\nAssignee: Bayu\nPriority: medium',
+    );
+  });
+
+  it('falls back to Unknown when creator or assignee name is blank', () => {
+    delete process.env.BOSSNOTE_URL;
+    delete process.env.APP_URL;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+    const text = buildTaskNotifyText({
+      title: '  ',
+      creatorName: '  ',
+      assigneeName: '',
+    });
+    assert.equal(text, 'New task: Untitled task\nFrom: Unknown\nAssignee: Unknown\nPriority: medium');
   });
 });
 

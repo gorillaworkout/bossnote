@@ -2,6 +2,9 @@ const DEFAULT_API_BASE = 'https://open.larksuite.com/open-apis';
 
 export type LarkTaskNotifyInput = {
   title: string;
+  /** Session user who created the task or performed the reassignment. */
+  creatorName: string;
+  creatorId?: string;
   assigneeName: string;
   priority?: string | null;
   /** Defaults to "New task". Use "reassign" after an assignee change. */
@@ -62,11 +65,13 @@ export function publicBossnoteUrl(): string {
 
 export function buildTaskNotifyText(input: LarkTaskNotifyInput): string {
   const title = (input.title || '').trim() || 'Untitled task';
+  const from = (input.creatorName || '').trim() || 'Unknown';
   const assignee = (input.assigneeName || '').trim() || 'Unknown';
   const priority = (input.priority || 'medium').trim() || 'medium';
   const heading = input.kind === 'reassign' ? 'Task reassigned' : 'New task';
   const lines = [
     `${heading}: ${title}`,
+    `From: ${from}`,
     `Assignee: ${assignee}`,
     `Priority: ${priority}`,
   ];

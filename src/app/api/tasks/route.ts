@@ -116,7 +116,7 @@ async function loadCreatedTask(taskId: string) {
 function notifyAssignee(
   assigneeId: string,
   title: string,
-  extra?: { assigneeName?: string; priority?: string | null },
+  extra?: { assigneeName?: string; priority?: string | null; creatorName?: string; creatorId?: string },
 ) {
   void sendPushToUser(assigneeId, {
     title: 'New task',
@@ -127,6 +127,8 @@ function notifyAssignee(
   });
   notifyLarkTask({
     title,
+    creatorName: extra?.creatorName || 'Unknown',
+    creatorId: extra?.creatorId,
     assigneeName: extra?.assigneeName || 'Unknown',
     priority: extra?.priority,
   });
@@ -200,6 +202,8 @@ export async function POST(request: NextRequest) {
     notifyAssignee(formUser.id, fields.title || fields.title_id, {
       assigneeName: formUser.name,
       priority: fields.priority,
+      creatorName: user.name,
+      creatorId: user.id,
     });
     return NextResponse.json({ task, ai_error: null, ok: true }, { status: 201 });
   }
@@ -280,6 +284,8 @@ export async function POST(request: NextRequest) {
   notifyAssignee(assigneeId, title || titleId, {
     assigneeName,
     priority: ai?.priority ?? 'medium',
+    creatorName: user.name,
+    creatorId: user.id,
   });
   return NextResponse.json({ task, ai_error: aiError, ok: true }, { status: 201 });
 }

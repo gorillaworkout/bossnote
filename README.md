@@ -50,10 +50,13 @@ English-only bosses who miss phone push still see new tasks in Lark. After a suc
 
 ```
 New task: {title}
-Assignee: {name}
+From: {creator name}
+Assignee: {assignee name}
 Priority: {priority}
 {bossnote url if known}
 ```
+
+Reassign uses `Task reassigned:` as the heading. `From` is the person who created the task or performed the reassignment (the signed-in user).
 
 Required on the server (already on Oracle prod `.env` — do **not** commit secrets):
 
