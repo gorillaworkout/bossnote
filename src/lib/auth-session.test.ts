@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server.js';
 import {
   COOKIE_NAME,
   SESSION_MAX_AGE,
@@ -11,7 +11,7 @@ import {
   toSessionUser,
   verifySessionToken,
   type SessionUser,
-} from './auth.ts';
+} from './session.ts';
 
 const SAMPLE: SessionUser = {
   id: 'bayu-001',
