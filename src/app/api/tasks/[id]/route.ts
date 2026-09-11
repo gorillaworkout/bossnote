@@ -101,6 +101,8 @@ export async function PUT(
       }).catch((err) => console.error('[bossnote] push after reassign failed:', err));
       notifyLarkTask({
         title,
+        creatorName: user.name,
+        creatorId: user.id,
         assigneeName: assignee.name,
         priority: String(task.priority || 'medium'),
         kind: 'reassign',
