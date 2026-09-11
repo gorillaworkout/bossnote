@@ -8,6 +8,13 @@ import {
   resolveCreateAssignee,
 } from '@/lib/assignee';
 import { buildTypedTaskFields } from '@/lib/typed-task';
+import {
+  assessVoiceClarity,
+  parseConfirmUnclearFlag,
+  resolveVoiceCreateTitles,
+  shouldInsertVoiceTask,
+  voiceUnclearPayload,
+} from '@/lib/voice-clarity';
 import { sendPushToUser } from '@/lib/push';
 import { notifyLarkTask } from '@/lib/lark';
 import { saveVoice, voiceExt } from '@/lib/voice-storage';
@@ -75,6 +82,7 @@ type CreateInput = {
   typedDeadline: string;
   modelRaw: string;
   voiceDurationRaw: string;
+  confirmUnclear: boolean;
 };
 
 async function readCreateInput(request: NextRequest): Promise<CreateInput> {
@@ -90,6 +98,7 @@ async function readCreateInput(request: NextRequest): Promise<CreateInput> {
       typedDeadline: String(body.deadline ?? '').trim(),
       modelRaw: String(body.model ?? ''),
       voiceDurationRaw: '',
+      confirmUnclear: parseConfirmUnclearFlag(body.confirm_unclear),
     };
   }
 
@@ -105,6 +114,7 @@ async function readCreateInput(request: NextRequest): Promise<CreateInput> {
     typedDeadline: String(formData.get('deadline') ?? '').trim(),
     modelRaw: String(formData.get('model') ?? ''),
     voiceDurationRaw: String(formData.get('voice_duration') ?? ''),
+    confirmUnclear: parseConfirmUnclearFlag(formData.get('confirm_unclear')),
   };
 }
 
@@ -237,6 +247,16 @@ export async function POST(request: NextRequest) {
     console.error('[bossnote] AI pipeline failed:', aiError);
   }
 
+  const clarity = assessVoiceClarity(ai, aiError);
+  if (!shouldInsertVoiceTask(clarity, input.confirmUnclear)) {
+    return NextResponse.json(voiceUnclearPayload(clarity, aiError), { status: 400 });
+  }
+
+  const { title, titleId } = resolveVoiceCreateTitles(ai, input.confirmUnclear && clarity.unclear);
+  if (!title) {
+    return NextResponse.json(voiceUnclearPayload(clarity, aiError), { status: 400 });
+  }
+
   const assignee = resolveCreateAssignee(input.formAssigneeId, ai?.assignee_hint, team);
 
   if (!assignee) {
@@ -253,9 +273,6 @@ export async function POST(request: NextRequest) {
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }
-
-  const title = ai?.title ?? 'Voice note — not transcribed yet';
-  const titleId = ai?.title_id ?? 'Voice note — not transcribed yet';
 
   await execute(
     `INSERT INTO tasks
@@ -285,7 +302,7 @@ export async function POST(request: NextRequest) {
       ai?.deadline ?? null,
       voicePath,
       voiceDuration,
-      aiError,
+      null,
     ],
   );
 
@@ -298,5 +315,5 @@ export async function POST(request: NextRequest) {
     creatorName: user.name,
     creatorId: user.id,
   });
-  return NextResponse.json({ task, ai_error: aiError, ok: true }, { status: 201 });
+  return NextResponse.json({ task, ai_error: null, ok: true }, { status: 201 });
 }

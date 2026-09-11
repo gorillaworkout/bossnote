@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test src/lib/ai-and-assignee.test.ts src/lib/push-digest.test.ts src/lib/lark.test.ts src/lib/auth-session.test.ts tests/sw-voice.test.mjs tests/voice-create-ui.test.mjs"
+    "test": "node --experimental-strip-types --test src/lib/ai-and-assignee.test.ts src/lib/push-digest.test.ts src/lib/lark.test.ts src/lib/auth-session.test.ts src/lib/voice-clarity.test.ts tests/sw-voice.test.mjs tests/voice-create-ui.test.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

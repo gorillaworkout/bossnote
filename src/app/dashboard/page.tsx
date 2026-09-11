@@ -6,6 +6,7 @@ import { PushEnableBanner } from '@/components/PushEnableBanner';
 import { VoicePlayer } from '@/components/VoicePlayer';
 import { taskTitles } from '@/lib/task-title';
 import { isAssigneeRequiredError } from '@/lib/assignee';
+import { hasUsableTaskText, isVoiceUnclearError } from '@/lib/voice-clarity';
 
 /* ── Types ── */
 
@@ -175,6 +176,82 @@ function AssigneePickModal({
   );
 }
 
+function VoiceUnclearModal({
+  draft,
+  busy,
+  onRerecord,
+  onType,
+  onKeepDraft,
+  onBack,
+}: {
+  draft: { confirmable: boolean; transcript: string; title: string };
+  busy: boolean;
+  onRerecord: () => void;
+  onType: () => void;
+  onKeepDraft: () => void;
+  onBack: () => void;
+}) {
+  const preview = hasUsableTaskText(draft.transcript)
+    ? draft.transcript
+    : hasUsableTaskText(draft.title)
+      ? draft.title
+      : '';
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-5" onClick={busy ? undefined : onBack}>
+      <div className="card-raised p-6 max-w-sm w-full bg-[var(--surface)] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-base font-semibold text-zinc-100">Couldn&apos;t understand this note</h3>
+        <p className="text-[12px] text-zinc-500 mt-1.5 leading-relaxed mb-4">
+          {draft.confirmable
+            ? 'The transcription looks incomplete. Re-record, type the task, or keep this draft. Nothing was saved yet.'
+            : 'Re-record or type it. Nothing was saved.'}
+        </p>
+        {preview && (
+          <div className="mb-4 rounded-lg bg-zinc-900/80 border border-zinc-800 px-3 py-2.5">
+            <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-1">Draft</p>
+            <p className="text-[13px] text-zinc-300 leading-relaxed whitespace-pre-wrap">{preview}</p>
+          </div>
+        )}
+        {busy && (
+          <p className="text-[12px] text-violet-300 flex items-center justify-center gap-2 mb-3">
+            <Spinner /> Creating…
+          </p>
+        )}
+        <div className="space-y-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onRerecord}
+            className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white py-2.5 rounded-lg text-[13px] font-medium transition-all disabled:opacity-40"
+          >
+            Re-record
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onType}
+            className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-100 py-2.5 rounded-lg text-[13px] font-medium transition-colors disabled:opacity-40"
+          >
+            Type it
+          </button>
+          {draft.confirmable && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onKeepDraft}
+              className="w-full text-[12px] text-zinc-400 hover:text-zinc-200 py-2 disabled:opacity-40"
+            >
+              Keep this draft
+            </button>
+          )}
+        </div>
+        <button type="button" onClick={onBack} disabled={busy} className="w-full mt-2 text-[12px] text-zinc-600 hover:text-zinc-400 py-1.5 disabled:opacity-40">
+          Back
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ── Main page ── */
 
 export default function DashboardPage() {
@@ -196,6 +273,8 @@ export default function DashboardPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [assigneeId, setAssigneeId] = useState('');
   const [needAssignee, setNeedAssignee] = useState(false);
+  const [voiceUnclear, setVoiceUnclear] = useState<{ confirmable: boolean; transcript: string; title: string } | null>(null);
+  const [confirmUnclear, setConfirmUnclear] = useState(false);
   const [createMode, setCreateMode] = useState<'voice' | 'typed'>('voice');
   const [typedText, setTypedText] = useState('');
   const [typedPriority, setTypedPriority] = useState('medium');
@@ -265,6 +344,8 @@ export default function DashboardPage() {
     setAudioUrl(null);
     setAssigneeId('');
     setNeedAssignee(false);
+    setVoiceUnclear(null);
+    setConfirmUnclear(false);
     setCreateMode('voice');
     setTypedText('');
     setTypedPriority('medium');
@@ -275,6 +356,8 @@ export default function DashboardPage() {
     setAudioBlob(null);
     setAssigneeId('');
     setNeedAssignee(false);
+    setVoiceUnclear(null);
+    setConfirmUnclear(false);
     setTypedText('');
     if (data.ai_error) setError('Task saved, but transcription failed.');
     else if (data.task?.assignee_name) setNotice(`Assigned to ${data.task.assignee_name}.`);
@@ -294,10 +377,12 @@ export default function DashboardPage() {
     createInFlightRef.current = false;
     setProcessing(false);
   };
-  const createTask = async (overrideAssigneeId?: string) => {
+  const createTask = async (overrideAssigneeId?: string, opts?: { confirmUnclear?: boolean }) => {
     if (!audioBlob || createInFlightRef.current) return;
     const chosenAssignee = (typeof overrideAssigneeId === 'string' ? overrideAssigneeId : assigneeId).trim();
     if (typeof overrideAssigneeId === 'string' && chosenAssignee) setAssigneeId(chosenAssignee);
+    const keepDraft = opts?.confirmUnclear === true || confirmUnclear;
+    if (opts?.confirmUnclear) setConfirmUnclear(true);
     if (!beginCreate()) return;
     try {
       const form = new FormData();
@@ -305,16 +390,28 @@ export default function DashboardPage() {
       if (chosenAssignee) form.append('assignee_id', chosenAssignee);
       form.append('voice_duration', String(recordingTime));
       form.append('model', aiModel);
+      if (keepDraft) form.append('confirm_unclear', '1');
       const res = await fetch('/api/tasks', { method: 'POST', body: form });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (isVoiceUnclearError(data)) {
+          setVoiceUnclear({
+            confirmable: Boolean(data.confirmable),
+            transcript: typeof data.transcript === 'string' ? data.transcript : '',
+            title: typeof data.title === 'string' ? data.title : '',
+          });
+          setNeedAssignee(false);
+          return;
+        }
         if (isAssigneeRequiredError(data)) {
           setNeedAssignee(true);
+          setVoiceUnclear(null);
           return;
         }
         throw new Error(data.error || 'Failed to create task');
       }
       setNeedAssignee(false);
+      setVoiceUnclear(null);
       if (user) await finishCreate(data, user);
     } catch (e) { setError((e as Error).message); } finally { endCreate(); }
   };
@@ -751,7 +848,7 @@ export default function DashboardPage() {
 
       {/* ═══════ NEW TASK / REMINDER MODAL ═══════ */}
       {showNewTask && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-5" onClick={() => { if (processing) return; setShowNewTask(false); setNeedAssignee(false); stopRecording(); }}>
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-5" onClick={() => { if (processing) return; setShowNewTask(false); setNeedAssignee(false); setVoiceUnclear(null); setConfirmUnclear(false); stopRecording(); }}>
           <div className="card-raised p-6 max-w-sm w-full bg-[var(--surface)] max-h-[90vh] overflow-y-auto relative" onClick={e => e.stopPropagation()}>
             {processing && (
               <div className="absolute inset-0 z-10 rounded-[inherit] bg-black/55 backdrop-blur-[1px] flex flex-col items-center justify-center gap-2">
@@ -832,7 +929,7 @@ export default function DashboardPage() {
                 </button>
               </div>
             )}
-            <button type="button" disabled={processing} onClick={() => { setShowNewTask(false); setNeedAssignee(false); stopRecording(); }} className="w-full mt-3 text-[12px] text-zinc-600 hover:text-zinc-400 py-1.5 transition-colors disabled:opacity-40">Cancel</button>
+            <button type="button" disabled={processing} onClick={() => { setShowNewTask(false); setNeedAssignee(false); setVoiceUnclear(null); setConfirmUnclear(false); stopRecording(); }} className="w-full mt-3 text-[12px] text-zinc-600 hover:text-zinc-400 py-1.5 transition-colors disabled:opacity-40">Cancel</button>
           </div>
         </div>
       )}
@@ -843,6 +940,41 @@ export default function DashboardPage() {
           busy={processing}
           onPick={(id) => { void createTask(id); }}
           onBack={() => setNeedAssignee(false)}
+        />
+      )}
+
+      {voiceUnclear && (
+        <VoiceUnclearModal
+          draft={voiceUnclear}
+          busy={processing}
+          onRerecord={() => {
+            setVoiceUnclear(null);
+            setConfirmUnclear(false);
+            setNeedAssignee(false);
+            setAudioBlob(null);
+            setAudioUrl(null);
+            setRecordingTime(0);
+            setCreateMode('voice');
+            setShowNewTask(true);
+          }}
+          onType={() => {
+            const draftText = hasUsableTaskText(voiceUnclear.transcript)
+              ? voiceUnclear.transcript
+              : hasUsableTaskText(voiceUnclear.title)
+                ? voiceUnclear.title
+                : '';
+            setVoiceUnclear(null);
+            setConfirmUnclear(false);
+            setNeedAssignee(false);
+            setCreateMode('typed');
+            if (draftText) setTypedText(draftText);
+            setShowNewTask(true);
+          }}
+          onKeepDraft={() => {
+            setVoiceUnclear(null);
+            void createTask(undefined, { confirmUnclear: true });
+          }}
+          onBack={() => setVoiceUnclear(null)}
         />
       )}
 

@@ -84,6 +84,7 @@ export interface VoiceTask {
   questions: string[];        // English
   questions_id: string[];     // Indonesian for staff
   assignee_hint: string | null; // spoken name, or null if unclear / not mentioned
+  confidence?: number | null; // optional 0–1 when the model returns one
 }
 
 const SYSTEM = `You have ONE job: turn a voice note into a structured task, in TWO languages —
@@ -223,6 +224,10 @@ function parseTask(raw: string, fallbackTranscript = ''): VoiceTask {
 
     const hintRaw = str(p.assignee_hint);
     const hint = hintRaw && hintRaw.toLowerCase() !== 'null' ? hintRaw : '';
+    const confidence =
+      typeof p.confidence === 'number' && Number.isFinite(p.confidence)
+        ? Math.min(1, Math.max(0, p.confidence))
+        : null;
 
     return {
       transcript: transcript || fallbackTranscript,
@@ -240,6 +245,7 @@ function parseTask(raw: string, fallbackTranscript = ''): VoiceTask {
       questions,
       questions_id,
       assignee_hint: hint || null,
+      confidence,
     };
   } catch {
     const body = cleaned || fallbackTranscript;
@@ -252,6 +258,7 @@ function parseTask(raw: string, fallbackTranscript = ''): VoiceTask {
       deliverables: [], deliverables_id: [],
       questions: [], questions_id: [],
       assignee_hint: null,
+      confidence: null,
     };
   }
 }
