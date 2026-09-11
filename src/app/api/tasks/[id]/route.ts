@@ -79,7 +79,10 @@ export async function PUT(
       task.created_by === user.id;
     if (!canReassign) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-    const assignee = await queryOne<{ id: string }>('SELECT id FROM users WHERE id = ?', [nextAssigneeId]);
+    const assignee = await queryOne<{ id: string; name: string }>(
+      'SELECT id, name FROM users WHERE id = ?',
+      [nextAssigneeId],
+    );
     if (!assignee) return NextResponse.json({ error: 'Assignee not found' }, { status: 400 });
 
     await execute(
@@ -89,12 +92,19 @@ export async function PUT(
 
     if (nextAssigneeId !== task.assignee_id) {
       const { sendPushToUser } = await import('@/lib/push');
+      const { notifyLarkTask } = await import('@/lib/lark');
       const title = String(task.title || task.title_id || 'New task');
       void sendPushToUser(nextAssigneeId, {
         title: 'New task',
         body: title,
         url: '/dashboard',
       }).catch((err) => console.error('[bossnote] push after reassign failed:', err));
+      notifyLarkTask({
+        title,
+        assigneeName: assignee.name,
+        priority: String(task.priority || 'medium'),
+        kind: 'reassign',
+      });
     }
 
     return NextResponse.json({ ok: true });

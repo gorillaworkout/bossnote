@@ -5,6 +5,7 @@ import { processVoiceNote, getUserModel, normalizeAudioModel } from '@/lib/ai';
 import { resolveAssigneeFromHint } from '@/lib/assignee';
 import { buildTypedTaskFields } from '@/lib/typed-task';
 import { sendPushToUser } from '@/lib/push';
+import { notifyLarkTask } from '@/lib/lark';
 import { saveVoice, voiceExt } from '@/lib/voice-storage';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -112,13 +113,22 @@ async function loadCreatedTask(taskId: string) {
   );
 }
 
-function notifyAssignee(assigneeId: string, title: string) {
+function notifyAssignee(
+  assigneeId: string,
+  title: string,
+  extra?: { assigneeName?: string; priority?: string | null },
+) {
   void sendPushToUser(assigneeId, {
     title: 'New task',
     body: title,
     url: '/dashboard',
   }).catch((err) => {
     console.error('[bossnote] push after create failed:', err);
+  });
+  notifyLarkTask({
+    title,
+    assigneeName: extra?.assigneeName || 'Unknown',
+    priority: extra?.priority,
   });
 }
 
@@ -187,7 +197,10 @@ export async function POST(request: NextRequest) {
     );
 
     const task = await loadCreatedTask(taskId);
-    notifyAssignee(formUser.id, fields.title || fields.title_id);
+    notifyAssignee(formUser.id, fields.title || fields.title_id, {
+      assigneeName: formUser.name,
+      priority: fields.priority,
+    });
     return NextResponse.json({ task, ai_error: null, ok: true }, { status: 201 });
   }
 
@@ -263,6 +276,10 @@ export async function POST(request: NextRequest) {
   );
 
   const task = await loadCreatedTask(taskId);
-  notifyAssignee(assigneeId, title || titleId);
+  const assigneeName = fromVoice?.name || formUser?.name || 'Unknown';
+  notifyAssignee(assigneeId, title || titleId, {
+    assigneeName,
+    priority: ai?.priority ?? 'medium',
+  });
   return NextResponse.json({ task, ai_error: aiError, ok: true }, { status: 201 });
 }
