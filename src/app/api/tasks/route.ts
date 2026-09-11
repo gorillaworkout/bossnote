@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { queryAll, queryOne, execute } from '@/lib/database';
 import { processVoiceNote, getUserModel, normalizeAudioModel } from '@/lib/ai';
-import { resolveAssigneeFromHint } from '@/lib/assignee';
+import {
+  ASSIGNEE_REQUIRED_CODE,
+  ASSIGNEE_REQUIRED_ERROR,
+  resolveCreateAssignee,
+} from '@/lib/assignee';
 import { buildTypedTaskFields } from '@/lib/typed-task';
 import { sendPushToUser } from '@/lib/push';
 import { notifyLarkTask } from '@/lib/lark';
@@ -224,18 +228,15 @@ export async function POST(request: NextRequest) {
     console.error('[bossnote] AI pipeline failed:', aiError);
   }
 
-  const fromVoice = resolveAssigneeFromHint(ai?.assignee_hint, team);
-  const formUser = input.formAssigneeId
-    ? team.find((u) => u.id === input.formAssigneeId)
-    : undefined;
-  const assigneeId = fromVoice?.id || formUser?.id;
+  const assignee = resolveCreateAssignee(input.formAssigneeId, ai?.assignee_hint, team);
 
-  if (!assigneeId) {
+  if (!assignee) {
     return NextResponse.json(
-      { error: 'Could not tell who this task is for from the voice note. Pick an assignee and try again.' },
+      { error: ASSIGNEE_REQUIRED_ERROR, code: ASSIGNEE_REQUIRED_CODE },
       { status: 400 },
     );
   }
+  const assigneeId = assignee.id;
 
   let voicePath: string;
   try {
@@ -280,7 +281,7 @@ export async function POST(request: NextRequest) {
   );
 
   const task = await loadCreatedTask(taskId);
-  const assigneeName = fromVoice?.name || formUser?.name || 'Unknown';
+  const assigneeName = assignee.name;
   notifyAssignee(assigneeId, title || titleId, {
     assigneeName,
     priority: ai?.priority ?? 'medium',

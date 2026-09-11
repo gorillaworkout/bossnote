@@ -7,7 +7,13 @@ import {
   normalizeAudioModel,
   withModelFallback,
 } from './ai.ts';
-import { resolveAssigneeFromHint } from './assignee.ts';
+import {
+  ASSIGNEE_REQUIRED_CODE,
+  ASSIGNEE_REQUIRED_ERROR,
+  isAssigneeRequiredError,
+  resolveAssigneeFromHint,
+  resolveCreateAssignee,
+} from './assignee.ts';
 
 const MEMBERS = [
   { id: 'bayu-001', name: 'Bayu' },
@@ -94,5 +100,44 @@ describe('resolveAssigneeFromHint', () => {
     assert.equal(resolveAssigneeFromHint('ingatkan Prista', TEAM)?.id, 'prista-001');
     assert.equal(resolveAssigneeFromHint('Admin tolong', TEAM)?.id, 'admin-001');
     assert.equal(resolveAssigneeFromHint('untuk Sandra', TEAM)?.id, 'sandra-001');
+  });
+
+  it('matches Indonesian honorifics without guessing a different person', () => {
+    assert.equal(resolveAssigneeFromHint('Pak Bayu', TEAM)?.id, 'bayu-001');
+    assert.equal(resolveAssigneeFromHint('Bu Sandra tolong', TEAM)?.id, 'sandra-001');
+    assert.equal(resolveAssigneeFromHint('mas Ian', TEAM)?.id, 'ian-001');
+    assert.equal(resolveAssigneeFromHint('kak Prista', TEAM)?.id, 'prista-001');
+  });
+});
+
+describe('resolveCreateAssignee', () => {
+  it('prefers the form-selected teammate over a conflicting AI hint', () => {
+    const picked = resolveCreateAssignee('ian-001', 'untuk Sandra', TEAM);
+    assert.equal(picked?.id, 'ian-001');
+    assert.equal(picked?.name, 'Ian');
+  });
+
+  it('uses the AI hint when Auto-from-voice sends no form assignee', () => {
+    assert.equal(resolveCreateAssignee('', 'untuk Bayu', TEAM)?.id, 'bayu-001');
+    assert.equal(resolveCreateAssignee(null, 'Sandra', TEAM)?.id, 'sandra-001');
+  });
+
+  it('falls back to the hint when the form id is not on the team', () => {
+    assert.equal(resolveCreateAssignee('missing-user', 'untuk Ian', TEAM)?.id, 'ian-001');
+  });
+
+  it('returns null when neither the form nor the hint resolves', () => {
+    assert.equal(resolveCreateAssignee('', null, TEAM), null);
+    assert.equal(resolveCreateAssignee('', 'please handle this', TEAM), null);
+    assert.equal(resolveCreateAssignee('missing-user', 'nobody', TEAM), null);
+  });
+});
+
+describe('isAssigneeRequiredError', () => {
+  it('detects the machine-readable create-path 400', () => {
+    assert.equal(isAssigneeRequiredError({ code: ASSIGNEE_REQUIRED_CODE, error: ASSIGNEE_REQUIRED_ERROR }), true);
+    assert.equal(isAssigneeRequiredError({ error: ASSIGNEE_REQUIRED_ERROR }), true);
+    assert.equal(isAssigneeRequiredError({ error: 'Unauthorized' }), false);
+    assert.equal(isAssigneeRequiredError(null), false);
   });
 });

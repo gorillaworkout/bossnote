@@ -33,7 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {children}
         <script dangerouslySetInnerHTML={{ __html: `
           if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js?v=7').catch(() => {});
+            navigator.serviceWorker.register('/sw.js?v=8').catch(() => {});
           }
         `}} />
       </body>
