@@ -9,6 +9,7 @@ interface User {
   name: string;
   email: string;
   role: string;
+  lark_open_id?: string | null;
   created_at: string;
 }
 
@@ -33,6 +34,7 @@ export default function ManageUsersPage() {
   const [editing, setEditing] = useState<User | null>(null);
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState<'boss' | 'member'>('member');
+  const [editLarkOpenId, setEditLarkOpenId] = useState('');
 
   const [confirmDelete, setConfirmDelete] = useState<User | null>(null);
 
@@ -101,7 +103,7 @@ export default function ManageUsersPage() {
     try {
       const r = await fetch(`/api/admin/users/${editing.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editName.trim(), role: editRole }),
+        body: JSON.stringify({ name: editName.trim(), role: editRole, lark_open_id: editLarkOpenId.trim() }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Failed to update user');
@@ -207,12 +209,15 @@ export default function ManageUsersPage() {
                       {roleBadge(u.role)}
                     </div>
                     <p className="text-[11px] text-zinc-600 truncate">{u.email}</p>
-                    <p className="text-[10px] text-zinc-700 mt-0.5">Created {fmtCreated(u.created_at)}</p>
+                    <p className="text-[10px] text-zinc-700 mt-0.5">
+                      Created {fmtCreated(u.created_at)}
+                      {u.lark_open_id ? ' · Lark mention ready' : ''}
+                    </p>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button
                       type="button"
-                      onClick={() => { setEditing(u); setEditName(u.name); setEditRole(u.role === 'boss' ? 'boss' : 'member'); }}
+                      onClick={() => { setEditing(u); setEditName(u.name); setEditRole(u.role === 'boss' ? 'boss' : 'member'); setEditLarkOpenId(u.lark_open_id || ''); }}
                       className="text-[11px] text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded-md hover:bg-zinc-800 transition-colors"
                     >
                       Edit
@@ -266,6 +271,11 @@ export default function ManageUsersPage() {
                 {editing.id === me.id && (
                   <p className="text-[11px] text-zinc-600 mt-1.5">You cannot change your own role.</p>
                 )}
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Lark Open ID (optional)</label>
+                <input type="text" value={editLarkOpenId} onChange={e => setEditLarkOpenId(e.target.value)} placeholder="ou_…" autoComplete="off" className="input-field w-full px-3 py-2.5 text-[14px]" />
+                <p className="text-[11px] text-zinc-600 mt-1.5">Used to @mention this person in the Lark group. Leave blank to look up by name.</p>
               </div>
               <div className="flex gap-2.5 pt-2">
                 <button type="button" onClick={() => setEditing(null)} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[13px] font-medium py-2 rounded-lg transition-colors">Cancel</button>

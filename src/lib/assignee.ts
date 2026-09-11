@@ -1,6 +1,7 @@
 export interface MemberRef {
   id: string;
   name: string;
+  lark_open_id?: string | null;
 }
 
 /** Machine-readable 400 when voice create cannot resolve an assignee. */

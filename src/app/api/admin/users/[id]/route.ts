@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { queryOne, execute } from '@/lib/database';
+import { normalizeLarkOpenId } from '@/lib/lark';
 
 function requireBoss(user: { id: string; role: string } | null) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -18,10 +19,14 @@ export async function PUT(
   if (denied) return denied;
 
   const { id } = await params;
-  const { name, role } = (await request.json()) as { name?: string; role?: string };
+  const { name, role, lark_open_id } = (await request.json()) as {
+    name?: string;
+    role?: string;
+    lark_open_id?: string | null;
+  };
 
-  const target = await queryOne<{ id: string; name: string; role: string }>(
-    'SELECT id, name, role FROM users WHERE id = ?',
+  const target = await queryOne<{ id: string; name: string; role: string; lark_open_id: string | null }>(
+    'SELECT id, name, role, lark_open_id FROM users WHERE id = ?',
     [id],
   );
   if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -49,12 +54,25 @@ export async function PUT(
     }
   }
 
+  let nextOpenId = target.lark_open_id;
+  if (lark_open_id !== undefined) {
+    const trimmed = typeof lark_open_id === 'string' ? lark_open_id.trim() : '';
+    if (!trimmed) {
+      nextOpenId = null;
+    } else {
+      nextOpenId = normalizeLarkOpenId(trimmed);
+      if (!nextOpenId) {
+        return NextResponse.json({ error: 'Lark Open ID looks invalid' }, { status: 400 });
+      }
+    }
+  }
+
   await execute(
-    'UPDATE users SET name = ?, role = COALESCE(?, role) WHERE id = ?',
-    [cleanName, cleanRole, id],
+    'UPDATE users SET name = ?, role = COALESCE(?, role), lark_open_id = ? WHERE id = ?',
+    [cleanName, cleanRole, nextOpenId, id],
   );
 
-  const updated = await queryOne('SELECT id, email, name, role, created_at FROM users WHERE id = ?', [id]);
+  const updated = await queryOne('SELECT id, email, name, role, lark_open_id, created_at FROM users WHERE id = ?', [id]);
   return NextResponse.json({ user: updated, ok: true });
 }
 

@@ -51,10 +51,12 @@ English-only bosses who miss phone push still see new tasks in Lark. After a suc
 ```
 New task: {title}
 From: {creator name}
-Assignee: {assignee name}
+Assignee: @Assignee   (Lark mention when a Lark id is known)
 Priority: {priority}
 {bossnote url if known}
 ```
+
+The assignee is **@mentioned** so they get a Lark notification in AgenticOS Group. Official `im/v1/messages` text syntax is `<at user_id="ou_xxx">Name</at>` (`user_id` = open_id, union_id, or user_id — not the BossNote display name). If mention lookup fails, the message still posts with a plain `Assignee: Name` line. Create/reassign never waits on Lark.
 
 Reassign uses `Task reassigned:` as the heading. `From` is the person who created the task or performed the reassignment (the signed-in user).
 
@@ -71,7 +73,16 @@ Optional:
 ```
 LARK_API_BASE=https://open.larksuite.com/open-apis
 BOSSNOTE_URL=https://your-bossnote-host
+LARK_OPEN_IDS=Bayu:ou_xxx,Ian:ou_yyy
 ```
+
+**Assignee → Lark id** (first match wins; never blocks task create):
+
+1. Optional `users.lark_open_id` — set in **Manage Users → Edit → Lark Open ID**, or apply `migrations/008_lark_open_id.sql` and update SQL.
+2. `LARK_OPEN_IDS` — `Name:ou_xxx` or `bossnote-user-id:ou_xxx` (comma list or JSON object). Use this if chat-member lookup is blocked.
+3. Group member list — `GET /im/v1/chats/{chat_id}/members` matched to the BossNote name (case-insensitive). Needs the bot scope to view group members. Cached a few minutes.
+
+How to get an `ou_…` open_id: Lark Admin / Open Platform (user open_id for this app), or inspect a message the person sent in the group. Names must match the Lark display name for automatic lookup (Bayu, Ian, Prista, Sandra).
 
 If any required Lark var is missing, create/reassign still succeeds; Lark is skipped (one warning log). The custom app bot must be in the group and allowed to send messages.
 
@@ -99,8 +110,8 @@ Members still only see tasks assigned to them. Bosses see the full board.
 ## Deploy notes
 
 1. `npm i`
-2. Apply `migrations/007_push_subscriptions.sql`
-3. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`)
+2. Apply `migrations/007_push_subscriptions.sql` and `migrations/008_lark_open_id.sql`
+3. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`, `LARK_OPEN_IDS`)
 4. Install the crontab line above
 5. Rebuild / restart (`npm run build && npm start` or your Oracle process manager)
 6. Installed PWAs pick up `bossnote-v8` after the next visit
