@@ -120,7 +120,13 @@ async function loadCreatedTask(taskId: string) {
 function notifyAssignee(
   assigneeId: string,
   title: string,
-  extra?: { assigneeName?: string; priority?: string | null; creatorName?: string; creatorId?: string },
+  extra?: {
+    assigneeName?: string;
+    assigneeOpenId?: string | null;
+    priority?: string | null;
+    creatorName?: string;
+    creatorId?: string;
+  },
 ) {
   void sendPushToUser(assigneeId, {
     title: 'New task',
@@ -134,6 +140,8 @@ function notifyAssignee(
     creatorName: extra?.creatorName || 'Unknown',
     creatorId: extra?.creatorId,
     assigneeName: extra?.assigneeName || 'Unknown',
+    assigneeId,
+    assigneeOpenId: extra?.assigneeOpenId,
     priority: extra?.priority,
   });
 }
@@ -143,8 +151,8 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const input = await readCreateInput(request);
-  const team = await queryAll<{ id: string; name: string }>(
-    'SELECT id, name FROM users ORDER BY name',
+  const team = await queryAll<{ id: string; name: string; lark_open_id: string | null }>(
+    'SELECT id, name, lark_open_id FROM users ORDER BY name',
   );
 
   // Typed path: no voice, no LLM. Works even when Gemini is down.
@@ -205,6 +213,7 @@ export async function POST(request: NextRequest) {
     const task = await loadCreatedTask(taskId);
     notifyAssignee(formUser.id, fields.title || fields.title_id, {
       assigneeName: formUser.name,
+      assigneeOpenId: formUser.lark_open_id,
       priority: fields.priority,
       creatorName: user.name,
       creatorId: user.id,
@@ -284,6 +293,7 @@ export async function POST(request: NextRequest) {
   const assigneeName = assignee.name;
   notifyAssignee(assigneeId, title || titleId, {
     assigneeName,
+    assigneeOpenId: assignee.lark_open_id,
     priority: ai?.priority ?? 'medium',
     creatorName: user.name,
     creatorId: user.id,

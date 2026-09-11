@@ -79,8 +79,8 @@ export async function PUT(
       task.created_by === user.id;
     if (!canReassign) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-    const assignee = await queryOne<{ id: string; name: string }>(
-      'SELECT id, name FROM users WHERE id = ?',
+    const assignee = await queryOne<{ id: string; name: string; lark_open_id: string | null }>(
+      'SELECT id, name, lark_open_id FROM users WHERE id = ?',
       [nextAssigneeId],
     );
     if (!assignee) return NextResponse.json({ error: 'Assignee not found' }, { status: 400 });
@@ -104,6 +104,8 @@ export async function PUT(
         creatorName: user.name,
         creatorId: user.id,
         assigneeName: assignee.name,
+        assigneeId: assignee.id,
+        assigneeOpenId: assignee.lark_open_id,
         priority: String(task.priority || 'medium'),
         kind: 'reassign',
       });

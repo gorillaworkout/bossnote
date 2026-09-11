@@ -75,23 +75,29 @@ const StatusBadge = ({ status }: { status: string }) => {
   );
 };
 
+const Spinner = ({ className = 'w-3.5 h-3.5 border-2 border-violet-400' }: { className?: string }) => (
+  <span className={`inline-block ${className} border-t-transparent rounded-full animate-spin`} />
+);
+
 function AssigneeSelect({
   users,
   value,
   onChange,
   includeAuto,
   autoLabel = 'Auto from voice (recommended)',
+  disabled,
 }: {
   users: User[];
   value: string;
   onChange: (id: string) => void;
   includeAuto?: boolean;
   autoLabel?: string;
+  disabled?: boolean;
 }) {
   const staff = users.filter((u) => u.role === 'member');
   const bosses = users.filter((u) => u.role === 'boss');
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="input-field px-2.5 py-2 text-[13px] w-full cursor-pointer">
+    <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="input-field px-2.5 py-2 text-[13px] w-full cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
       {includeAuto && <option value="">{autoLabel}</option>}
       {!includeAuto && <option value="">Choose assignee…</option>}
       {staff.length > 0 && (
@@ -142,12 +148,17 @@ function AssigneePickModal({
     )
   );
   return (
-    <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-5" onClick={onBack}>
+    <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-5" onClick={busy ? undefined : onBack}>
       <div className="card-raised p-6 max-w-sm w-full bg-[var(--surface)] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-zinc-100">Who is this task for?</h3>
         <p className="text-[12px] text-zinc-500 mt-1.5 leading-relaxed mb-4">
           We couldn&apos;t tell from the voice note. Pick a teammate — your recording is kept.
         </p>
+        {busy && (
+          <p className="text-[12px] text-violet-300 flex items-center justify-center gap-2 mb-3">
+            <Spinner /> Creating…
+          </p>
+        )}
         {users.length === 0 ? (
           <p className="text-[13px] text-zinc-500 mb-3">No teammates loaded. Try again in a moment.</p>
         ) : (
@@ -202,6 +213,7 @@ export default function DashboardPage() {
 
   const [answering, setAnswering] = useState<{ idx: number; blob: Blob | null; recording: boolean }>({ idx: -1, blob: null, recording: false });
   const questionRecorderRef = useRef<MediaRecorder | null>(null);
+  const createInFlightRef = useRef(false);
   const [confirmDelete, setConfirmDelete] = useState<Task | null>(null);
   const [kanbanTab, setKanbanTab] = useState<'todo' | 'in_progress' | 'waiting' | 'done'>('todo');
   const [mobileDetail, setMobileDetail] = useState(false);
@@ -270,11 +282,23 @@ export default function DashboardPage() {
     const canOpen = data.task?.id && (currentUser.role === 'boss' || data.task.assignee_id === currentUser.id);
     if (canOpen && data.task?.id) await loadTaskDetail(data.task.id);
   };
+  const beginCreate = () => {
+    if (createInFlightRef.current) return false;
+    createInFlightRef.current = true;
+    setProcessing(true);
+    setError(null);
+    setNotice(null);
+    return true;
+  };
+  const endCreate = () => {
+    createInFlightRef.current = false;
+    setProcessing(false);
+  };
   const createTask = async (overrideAssigneeId?: string) => {
-    if (!audioBlob || processing) return;
+    if (!audioBlob || createInFlightRef.current) return;
     const chosenAssignee = (typeof overrideAssigneeId === 'string' ? overrideAssigneeId : assigneeId).trim();
     if (typeof overrideAssigneeId === 'string' && chosenAssignee) setAssigneeId(chosenAssignee);
-    setProcessing(true); setError(null); setNotice(null);
+    if (!beginCreate()) return;
     try {
       const form = new FormData();
       form.append('voice', audioBlob, 'recording.webm');
@@ -292,11 +316,11 @@ export default function DashboardPage() {
       }
       setNeedAssignee(false);
       if (user) await finishCreate(data, user);
-    } catch (e) { setError((e as Error).message); } finally { setProcessing(false); }
+    } catch (e) { setError((e as Error).message); } finally { endCreate(); }
   };
   const createTypedTask = async () => {
-    if (!typedText.trim() || !assigneeId || processing) return;
-    setProcessing(true); setError(null); setNotice(null);
+    if (!typedText.trim() || !assigneeId || createInFlightRef.current) return;
+    if (!beginCreate()) return;
     try {
       const form = new FormData();
       form.append('text', typedText.trim());
@@ -307,7 +331,7 @@ export default function DashboardPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to create reminder');
       if (user) await finishCreate(data, user);
-    } catch (e) { setError((e as Error).message); } finally { setProcessing(false); }
+    } catch (e) { setError((e as Error).message); } finally { endCreate(); }
   };
 
   /* ── Task actions ── */
@@ -597,7 +621,7 @@ export default function DashboardPage() {
       <PushEnableBanner />
 
       {/* ═══════ BANNERS ═══════ */}
-      {processing && <div className="h-8 bg-violet-950/40 border-b border-violet-800/40 text-violet-300 text-[12px] flex items-center justify-center gap-2 flex-shrink-0"><span className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin"/>{createMode === 'typed' ? 'Saving reminder…' : 'Processing voice note…'}</div>}
+      {processing && <div className="h-8 bg-violet-950/40 border-b border-violet-800/40 text-violet-300 text-[12px] flex items-center justify-center gap-2 flex-shrink-0"><Spinner />{showNewTask || needAssignee ? 'Creating…' : createMode === 'typed' ? 'Saving reminder…' : 'Processing voice note…'}</div>}
       {error && <div className="bg-[var(--danger-soft)] border-b border-red-900/30 text-red-400 text-[12px] flex items-center px-4 py-2 flex-shrink-0"><AlertIcon /><span className="flex-1 ml-2">{error}</span><button onClick={() => setError(null)} className="text-red-500/70 hover:text-red-400 ml-3">Dismiss</button></div>}
       {notice && <div className="bg-emerald-950/30 border-b border-emerald-900/30 text-emerald-400 text-[12px] flex items-center px-4 py-2 flex-shrink-0"><span className="flex-1">{notice}</span><button onClick={() => setNotice(null)} className="text-emerald-500/70 hover:text-emerald-400 ml-3">Dismiss</button></div>}
 
@@ -727,13 +751,20 @@ export default function DashboardPage() {
 
       {/* ═══════ NEW TASK / REMINDER MODAL ═══════ */}
       {showNewTask && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-5" onClick={() => { setShowNewTask(false); setNeedAssignee(false); stopRecording(); }}>
-          <div className="card-raised p-6 max-w-sm w-full bg-[var(--surface)] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-5" onClick={() => { if (processing) return; setShowNewTask(false); setNeedAssignee(false); stopRecording(); }}>
+          <div className="card-raised p-6 max-w-sm w-full bg-[var(--surface)] max-h-[90vh] overflow-y-auto relative" onClick={e => e.stopPropagation()}>
+            {processing && (
+              <div className="absolute inset-0 z-10 rounded-[inherit] bg-black/55 backdrop-blur-[1px] flex flex-col items-center justify-center gap-2">
+                <Spinner className="w-6 h-6 border-[2.5px] border-violet-300" />
+                <p className="text-[13px] font-medium text-zinc-100">Creating…</p>
+                <p className="text-[11px] text-zinc-400">Please wait — do not tap again.</p>
+              </div>
+            )}
             <div className="flex rounded-lg bg-zinc-900 p-0.5 mb-4">
-              <button type="button" onClick={() => { setCreateMode('voice'); }}
-                className={`flex-1 py-1.5 rounded-md text-[12px] font-medium transition-colors ${createMode === 'voice' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500'}`}>Voice</button>
-              <button type="button" onClick={() => { setCreateMode('typed'); stopRecording(); }}
-                className={`flex-1 py-1.5 rounded-md text-[12px] font-medium transition-colors ${createMode === 'typed' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500'}`}>Type</button>
+              <button type="button" disabled={processing} onClick={() => { setCreateMode('voice'); }}
+                className={`flex-1 py-1.5 rounded-md text-[12px] font-medium transition-colors disabled:opacity-40 ${createMode === 'voice' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500'}`}>Voice</button>
+              <button type="button" disabled={processing} onClick={() => { setCreateMode('typed'); stopRecording(); }}
+                className={`flex-1 py-1.5 rounded-md text-[12px] font-medium transition-colors disabled:opacity-40 ${createMode === 'typed' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500'}`}>Type</button>
             </div>
 
             {createMode === 'voice' ? (
@@ -747,19 +778,21 @@ export default function DashboardPage() {
                 </div>
                 <div className="text-left mb-3">
                   <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Assign to (optional)</label>
-                  <AssigneeSelect users={users} value={assigneeId} onChange={setAssigneeId} includeAuto autoLabel="Auto from voice" />
+                  <AssigneeSelect users={users} value={assigneeId} onChange={setAssigneeId} includeAuto autoLabel="Auto from voice" disabled={processing} />
                   <p className="text-[11px] text-zinc-600 mt-1.5 leading-relaxed">Optional. If the voice note does not name anyone, we will ask who it is for.</p>
                 </div>
                 {!audioBlob ? (
-                  <button onClick={recording ? stopRecording : startRecording} className={`w-full py-2.5 rounded-lg text-[13px] font-medium transition-all duration-200 ${recording ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-[0_2px_8px_rgb(99_102_241/0.3)]'}`}>
+                  <button disabled={processing} onClick={recording ? stopRecording : startRecording} className={`w-full py-2.5 rounded-lg text-[13px] font-medium transition-all duration-200 disabled:opacity-40 ${recording ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-[0_2px_8px_rgb(99_102_241/0.3)]'}`}>
                     {recording ? 'Stop Recording' : 'Start Recording'}
                   </button>
                 ) : (
                   <div className="space-y-3">
                     <audio controls className="w-full h-9 audio-styled" src={audioBlob ? URL.createObjectURL(audioBlob) : ''}/>
                     <div className="flex gap-2">
-                      <button onClick={() => { void createTask(); }} className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">Create Task</button>
-                      <button onClick={() => { setAudioBlob(null); setRecordingTime(0); }} className="px-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded-lg text-[13px] transition-colors">Re-record</button>
+                      <button type="button" disabled={processing} onClick={() => { void createTask(); }} className="flex-1 inline-flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">
+                        {processing ? <><Spinner className="w-3.5 h-3.5 border-2 border-white" /> Creating…</> : 'Create Task'}
+                      </button>
+                      <button type="button" disabled={processing} onClick={() => { setAudioBlob(null); setRecordingTime(0); }} className="px-4 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-400 rounded-lg text-[13px] transition-colors">Re-record</button>
                     </div>
                   </div>
                 )}
@@ -777,7 +810,7 @@ export default function DashboardPage() {
                 </div>
                 <div>
                   <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Assign to</label>
-                  <AssigneeSelect users={users} value={assigneeId} onChange={setAssigneeId} />
+                  <AssigneeSelect users={users} value={assigneeId} onChange={setAssigneeId} disabled={processing} />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -793,13 +826,13 @@ export default function DashboardPage() {
                     <input type="date" value={typedDeadline} onChange={e => setTypedDeadline(e.target.value)} className="input-field px-2.5 py-2 text-[13px] w-full" />
                   </div>
                 </div>
-                <button onClick={createTypedTask} disabled={!typedText.trim() || !assigneeId || processing}
-                  className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">
-                  Create Reminder
+                <button type="button" onClick={createTypedTask} disabled={!typedText.trim() || !assigneeId || processing}
+                  className="w-full inline-flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">
+                  {processing ? <><Spinner className="w-3.5 h-3.5 border-2 border-white" /> Creating…</> : 'Create Reminder'}
                 </button>
               </div>
             )}
-            <button onClick={() => { setShowNewTask(false); setNeedAssignee(false); stopRecording(); }} className="w-full mt-3 text-[12px] text-zinc-600 hover:text-zinc-400 py-1.5 transition-colors">Cancel</button>
+            <button type="button" disabled={processing} onClick={() => { setShowNewTask(false); setNeedAssignee(false); stopRecording(); }} className="w-full mt-3 text-[12px] text-zinc-600 hover:text-zinc-400 py-1.5 transition-colors disabled:opacity-40">Cancel</button>
           </div>
         </div>
       )}

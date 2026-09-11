@@ -19,7 +19,7 @@ export async function GET() {
   if (denied) return denied;
 
   const users = await queryAll(
-    'SELECT id, email, name, role, created_at FROM users ORDER BY LOWER(name)',
+    'SELECT id, email, name, role, lark_open_id, created_at FROM users ORDER BY LOWER(name)',
   );
   return NextResponse.json({ users });
 }
