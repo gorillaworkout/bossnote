@@ -11,6 +11,8 @@ import {
   ASSIGNEE_REQUIRED_CODE,
   ASSIGNEE_REQUIRED_ERROR,
   isAssigneeRequiredError,
+  assigneeOptionLabel,
+  defaultBossAssigneeFilter,
   resolveAssigneeFromHint,
   resolveCreateAssignee,
 } from './assignee.ts';
@@ -130,6 +132,20 @@ describe('resolveCreateAssignee', () => {
     assert.equal(resolveCreateAssignee('', null, TEAM), null);
     assert.equal(resolveCreateAssignee('', 'please handle this', TEAM), null);
     assert.equal(resolveCreateAssignee('missing-user', 'nobody', TEAM), null);
+  });
+});
+
+describe('assignee picker labels and boss filter', () => {
+  it('labels Boss accounts separately from staff', () => {
+    assert.equal(assigneeOptionLabel({ name: 'Ian', role: 'boss' }), 'Ian (Boss)');
+    assert.equal(assigneeOptionLabel({ name: 'Bayu', role: 'member' }), 'Bayu (Staff)');
+    assert.equal(assigneeOptionLabel({ name: '  ', role: 'boss' }), 'Unknown (Boss)');
+  });
+
+  it('defaults a boss board to tasks assigned to that boss', () => {
+    assert.equal(defaultBossAssigneeFilter({ id: 'boss-001', role: 'boss' }), 'boss-001');
+    assert.equal(defaultBossAssigneeFilter({ id: 'bayu-001', role: 'member' }), '');
+    assert.equal(defaultBossAssigneeFilter(null), '');
   });
 });
 

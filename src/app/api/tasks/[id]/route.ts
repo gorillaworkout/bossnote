@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { queryOne, execute } from '@/lib/database';
+import { deleteTaskImage } from '@/lib/image-storage';
+import { assignmentPushUrl, canViewTask } from '@/lib/task-access';
 
 export async function GET(
   _request: NextRequest,
@@ -21,8 +23,7 @@ export async function GET(
   );
   if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 });
 
-  // Auth check
-  if (user.role === 'member' && task.assignee_id !== user.id) {
+  if (!canViewTask(user, { assignee_id: String(task.assignee_id), created_by: String(task.created_by) })) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -97,7 +98,7 @@ export async function PUT(
       void sendPushToUser(nextAssigneeId, {
         title: 'New task',
         body: title,
-        url: '/dashboard',
+        url: assignmentPushUrl(id),
       }).catch((err) => console.error('[bossnote] push after reassign failed:', err));
       notifyLarkTask({
         title,
@@ -108,6 +109,7 @@ export async function PUT(
         assigneeOpenId: assignee.lark_open_id,
         priority: String(task.priority || 'medium'),
         kind: 'reassign',
+        taskId: id,
       });
     }
 
@@ -127,5 +129,6 @@ export async function DELETE(
 
   const { id } = await params;
   await execute('DELETE FROM tasks WHERE id = ?', [id]);
+  deleteTaskImage(id);
   return NextResponse.json({ ok: true });
 }
