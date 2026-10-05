@@ -5,6 +5,7 @@ import {
   formatLarkMention,
   getTenantToken,
   isLarkConfigured,
+  matchOpenIdByPersonName,
   normalizeLarkOpenId,
   notifyLarkTaskAsync,
   parseLarkOpenIdMap,
@@ -114,6 +115,20 @@ describe('buildTaskNotifyText', () => {
       assigneeName: '',
     });
     assert.equal(text, 'New task: Untitled task\nFrom: Unknown\nAssignee: Unknown\nPriority: medium');
+  });
+
+  it('appends a task link when a task id is present', () => {
+    process.env.BOSSNOTE_URL = 'https://bossnote.example/';
+    const text = buildTaskNotifyText({
+      title: 'Fix login',
+      creatorName: 'Bayu',
+      assigneeName: 'Ian',
+      assigneeOpenId: 'ou_ian',
+      taskId: 'task 1',
+      priority: 'high',
+    });
+    assert.match(text, /Assignee: <at user_id="ou_ian">Ian<\/at>/);
+    assert.match(text, /https:\/\/bossnote\.example\/dashboard\?task=task%201$/);
   });
 
   it('tags the assignee with the official text @mention when an open_id is known', () => {
@@ -329,6 +344,58 @@ describe('resolveAssigneeOpenId / notifyLarkTaskAsync', () => {
     assert.deepEqual(JSON.parse(body.content), {
       text: 'New task: Review deck\nFrom: Bayu\nAssignee: Ian\nPriority: high',
     });
+  });
+
+  it('matches Bayu to Lark display name Bayu Darmawan', async () => {
+    assert.equal(
+      matchOpenIdByPersonName('Bayu', new Map([['bayu darmawan', 'ou_bayu_full']])),
+      'ou_bayu_full',
+    );
+    assert.equal(
+      matchOpenIdByPersonName('Bayu Darmawan', new Map([['bayu', 'ou_bayu_short']])),
+      'ou_bayu_short',
+    );
+    assert.equal(
+      matchOpenIdByPersonName('Bayu', new Map([
+        ['bayu darmawan', 'ou_one'],
+        ['bayu santoso', 'ou_two'],
+      ])),
+      null,
+    );
+
+    setLarkEnv();
+    delete process.env.LARK_OPEN_IDS;
+    mockFetch((url) => {
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return jsonResponse({ code: 0, msg: 'ok', tenant_access_token: 't-abc', expire: 7200 });
+      }
+      if (url.includes('/members')) {
+        return jsonResponse({
+          code: 0,
+          msg: 'ok',
+          data: {
+            items: [{ member_id: 'ou_bayu_chat', name: 'Bayu Darmawan' }],
+            has_more: false,
+          },
+        });
+      }
+      return jsonResponse({ code: 1, msg: 'unexpected' }, 404);
+    });
+    assert.equal(await resolveAssigneeOpenId({ assigneeName: 'Bayu' }), 'ou_bayu_chat');
+    assert.equal(await resolveAssigneeOpenId({ assigneeName: 'Bayu Darmawan' }), 'ou_bayu_chat');
+  });
+
+  it('matches LARK_OPEN_IDS full name Bayu Darmawan to the short BossNote name', async () => {
+    clearLarkEnv();
+    process.env.LARK_OPEN_IDS = 'Bayu Darmawan:ou_bayu_env,boss-001:ou_ian';
+    assert.equal(
+      await resolveAssigneeOpenId({ assigneeId: 'bayu-001', assigneeName: 'Bayu' }),
+      'ou_bayu_env',
+    );
+    assert.equal(
+      await resolveAssigneeOpenId({ assigneeId: 'boss-001', assigneeName: 'Bayu' }),
+      'ou_ian',
+    );
   });
 
   it('posts an @mention when env mapping is present', async () => {

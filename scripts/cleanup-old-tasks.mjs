@@ -12,6 +12,8 @@ import path from 'path';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const VOICE_DIR = process.env.VOICE_UPLOAD_DIR || '/home/ubuntu/data/bossnote-voices';
+const IMAGE_DIR = process.env.IMAGE_UPLOAD_DIR || '/home/ubuntu/data/bossnote-images';
+const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif'];
 const RETENTION_MONTHS = 6;
 
 if (!DATABASE_URL) {
@@ -42,6 +44,21 @@ function deleteFile(filename) {
   }
 }
 
+function deleteTaskImage(taskId) {
+  if (!/^[a-f0-9-]{36}$/i.test(taskId || '')) return;
+  for (const ext of IMAGE_EXTS) {
+    const p = path.join(IMAGE_DIR, `${taskId}.${ext}`);
+    try {
+      if (fs.existsSync(p)) {
+        fs.unlinkSync(p);
+        console.log('[cleanup] removed image', `${taskId}.${ext}`);
+      }
+    } catch (e) {
+      console.error('[cleanup] failed to remove image', taskId, e.message);
+    }
+  }
+}
+
 async function main() {
   const client = await pool.connect();
   try {
@@ -60,7 +77,10 @@ async function main() {
       for (const r of replies) replyFiles.push(r.voice_path);
     }
 
-    for (const t of doneTasks) deleteFile(voiceFilename(t.voice_path));
+    for (const t of doneTasks) {
+      deleteFile(voiceFilename(t.voice_path));
+      deleteTaskImage(t.id);
+    }
     for (const vp of replyFiles) deleteFile(voiceFilename(vp));
 
     let deleted = 0;

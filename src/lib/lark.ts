@@ -11,6 +11,8 @@ export type LarkTaskNotifyInput = {
   /** Stored Lark open_id / union_id / user_id when already known. */
   assigneeOpenId?: string | null;
   priority?: string | null;
+  /** Task id so the group message can link to the screenshot. */
+  taskId?: string;
   /** Defaults to "New task". Use "reassign" after an assignee change. */
   kind?: 'new' | 'reassign';
 };
@@ -90,6 +92,66 @@ export function normalizeLarkOpenId(value: unknown): string | null {
   return id;
 }
 
+/** Fold a person name for mention lookup (case, accents, punctuation). */
+export function foldPersonName(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Match a BossNote name to a Lark display name.
+ * Exact match wins. Otherwise a unique first-name or prefix match
+ * ("Bayu" ↔ "Bayu Darmawan"). Two candidates → null (never guess).
+ */
+export function matchOpenIdByPersonName(personName: string, byName: Map<string, string>): string | null {
+  const folded = foldPersonName(personName);
+  if (!folded) return null;
+
+  const exact = byName.get(folded);
+  if (exact) return exact;
+
+  const queryTokens = folded.split(' ').filter((token) => token.length >= 3);
+  if (queryTokens.length === 0) return null;
+  const queryFirst = queryTokens[0];
+
+  const hits = new Set<string>();
+  for (const [name, id] of byName) {
+    if (!id) continue;
+    const nameTokens = name.split(' ').filter((token) => token.length >= 3);
+    if (nameTokens.length === 0) continue;
+    const sameFirst = nameTokens[0] === queryFirst;
+    const prefix = name.startsWith(`${folded} `) || folded.startsWith(`${name} `);
+    if (sameFirst || prefix) hits.add(id);
+  }
+  if (hits.size === 1) return [...hits][0];
+  return null;
+}
+
+/** BossNote ids (bayu-001) are not display names. */
+function isIdLikeKey(key: string): boolean {
+  return /[-_]/.test(key) && !/\s/.test(key);
+}
+
+function foldedNameIndex(source: Map<string, string>): Map<string, string> {
+  const out = new Map<string, string>();
+  const ambiguous = new Set<string>();
+  for (const [key, id] of source) {
+    if (!id || isIdLikeKey(key)) continue;
+    const folded = foldPersonName(key);
+    if (!folded) continue;
+    const prev = out.get(folded);
+    if (prev && prev !== id) ambiguous.add(folded);
+    else out.set(folded, id);
+  }
+  for (const name of ambiguous) out.delete(name);
+  return out;
+}
+
 function sanitizeAtDisplayName(name: string): string {
   const cleaned = name.replace(/[<>]/g, '').replace(/\s+/g, ' ').trim();
   return cleaned || 'Unknown';
@@ -158,8 +220,11 @@ export function buildTaskNotifyText(input: LarkTaskNotifyInput): string {
     `Assignee: ${formatLarkMention(assignee, input.assigneeOpenId)}`,
     `Priority: ${priority}`,
   ];
-  const url = publicBossnoteUrl();
-  if (url) lines.push(url);
+  const url = publicBossnoteUrl().replace(/\/+$/, '');
+  if (url) {
+    const taskId = (input.taskId || '').trim();
+    lines.push(taskId ? `${url}/dashboard?task=${encodeURIComponent(taskId)}` : url);
+  }
   return lines.join('\n');
 }
 
@@ -260,7 +325,7 @@ async function fetchChatMemberOpenIds(config: LarkConfig, token: string): Promis
 
     for (const item of data.data?.items || []) {
       const id = normalizeLarkOpenId(item.member_id);
-      const nameKey = (item.name || '').trim().toLowerCase();
+      const nameKey = foldPersonName(item.name || '');
       if (!id || !nameKey) continue;
       if (byName.has(nameKey) && byName.get(nameKey) !== id) {
         ambiguous.add(nameKey);
@@ -278,7 +343,7 @@ async function fetchChatMemberOpenIds(config: LarkConfig, token: string): Promis
 }
 
 async function chatMemberOpenIdByName(name: string): Promise<string | null> {
-  const folded = name.trim().toLowerCase();
+  const folded = foldPersonName(name);
   if (!folded) return null;
 
   try {
@@ -293,7 +358,7 @@ async function chatMemberOpenIdByName(name: string): Promise<string | null> {
       const byName = await fetchChatMemberOpenIds(config, token);
       cachedMembers = { key, byName, expiresAt: now + MEMBER_CACHE_MS };
     }
-    return cachedMembers.byName.get(folded) || null;
+    return matchOpenIdByPersonName(folded, cachedMembers.byName);
   } catch (err) {
     if (!membersLookupLogged) {
       membersLookupLogged = true;
@@ -320,9 +385,8 @@ export async function resolveAssigneeOpenId(input: {
     const assigneeId = (input.assigneeId || '').trim().toLowerCase();
     if (assigneeId && envMap.has(assigneeId)) return envMap.get(assigneeId) || null;
     const assigneeName = (input.assigneeName || '').trim();
-    if (assigneeName && envMap.has(assigneeName.toLowerCase())) {
-      return envMap.get(assigneeName.toLowerCase()) || null;
-    }
+    const fromEnv = matchOpenIdByPersonName(assigneeName, foldedNameIndex(envMap));
+    if (fromEnv) return fromEnv;
 
     return await chatMemberOpenIdByName(assigneeName);
   } catch (err) {

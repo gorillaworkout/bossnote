@@ -89,3 +89,19 @@ export function resolveCreateAssignee(
   }
   return resolveAssigneeFromHint(hint, members);
 }
+
+/** Visible picker label so a Boss account is obvious next to staff. */
+export function assigneeOptionLabel(user: { name: string; role: string }): string {
+  const name = (user.name || '').trim() || 'Unknown';
+  const role = user.role === 'boss' ? 'Boss' : 'Staff';
+  return `${name} (${role})`;
+}
+
+/**
+ * Bosses open the board on work assigned to them.
+ * Everyone else has no extra assignee filter (members are already scoped by the API).
+ */
+export function defaultBossAssigneeFilter(user: { id: string; role: string } | null | undefined): string {
+  if (!user || user.role !== 'boss') return '';
+  return (user.id || '').trim();
+}

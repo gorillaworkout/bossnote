@@ -5,8 +5,13 @@ import { DashboardHeader } from '@/components/DashboardHeader';
 import { PushEnableBanner } from '@/components/PushEnableBanner';
 import { VoicePlayer } from '@/components/VoicePlayer';
 import { taskTitles } from '@/lib/task-title';
-import { isAssigneeRequiredError } from '@/lib/assignee';
+import { assigneeOptionLabel, defaultBossAssigneeFilter, isAssigneeRequiredError } from '@/lib/assignee';
+import { taskImageSrc } from '@/lib/task-image';
+import { prepareTaskImage } from '@/lib/prepare-task-image';
 import { hasUsableTaskText, isVoiceUnclearError } from '@/lib/voice-clarity';
+import { uploadTaskImage } from '@/components/upload-task-image';
+import { TaskImageField } from '@/components/TaskImageField';
+import { TaskScreenshot } from '@/components/TaskScreenshot';
 
 /* ── Types ── */
 
@@ -23,7 +28,8 @@ interface Task {
   ai_error: string | null;
   deadline: string | null; voice_path: string | null; voice_duration: number | null;
   boss_name: string; assignee_name: string; assignee_id: string; created_by: string;
-  created_at: string; reply_count: number;
+  created_at: string; updated_at?: string | null; reply_count: number;
+  image_path?: string | null;
 }
 interface Reply {
   id: string; user_id: string; user_name: string; voice_path: string;
@@ -103,12 +109,12 @@ function AssigneeSelect({
       {!includeAuto && <option value="">Choose assignee…</option>}
       {staff.length > 0 && (
         <optgroup label="Staff">
-          {staff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          {staff.map((u) => <option key={u.id} value={u.id}>{assigneeOptionLabel(u)}</option>)}
         </optgroup>
       )}
       {bosses.length > 0 && (
         <optgroup label="Boss">
-          {bosses.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          {bosses.map((u) => <option key={u.id} value={u.id}>{assigneeOptionLabel(u)}</option>)}
         </optgroup>
       )}
     </select>
@@ -141,7 +147,7 @@ function AssigneePickModal({
               onClick={() => onPick(u.id)}
               className="w-full text-left px-3 py-2.5 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-100 text-[13px] font-medium transition-colors disabled:opacity-40"
             >
-              {u.name}
+              {assigneeOptionLabel(u)}
             </button>
           ))}
         </div>
@@ -279,6 +285,14 @@ export default function DashboardPage() {
   const [typedText, setTypedText] = useState('');
   const [typedPriority, setTypedPriority] = useState('medium');
   const [typedDeadline, setTypedDeadline] = useState('');
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [imageProgress, setImageProgress] = useState<number | null>(null);
+  const [detailImageError, setDetailImageError] = useState<string | null>(null);
+  const [detailImageProgress, setDetailImageProgress] = useState<number | null>(null);
+  const [detailImageBusy, setDetailImageBusy] = useState(false);
+  const openedTaskRef = useRef<string | null>(null);
 
   const [recording, setRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -312,6 +326,7 @@ export default function DashboardPage() {
     fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' }).then(r => r.json()).then(d => {
       if (!d.user) { window.location.href = '/'; return; }
       setUser(d.user);
+      setFilterAssignee(defaultBossAssigneeFilter(d.user));
       fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users || []));
       fetch('/api/settings/model').then(r => r.json()).then(d => {
         const options: string[] = Array.isArray(d.options) && d.options.length ? d.options : ['ag/gemini-3.7-flash-high'];
@@ -338,6 +353,33 @@ export default function DashboardPage() {
     setRecording(true);
   };
   const stopRecording = () => { mediaRecorderRef.current?.stop(); setRecording(false); if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+  const clearImageDraft = () => {
+    setImagePreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setImageFile(null);
+    setImageError(null);
+    setImageProgress(null);
+  };
+  const onPickImage = async (file: File | null) => {
+    if (!file) {
+      clearImageDraft();
+      return;
+    }
+    const prepared = await prepareTaskImage(file);
+    if (prepared.error) {
+      clearImageDraft();
+      setImageError(`${prepared.error} You can still create the task without it.`);
+      return;
+    }
+    setImagePreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(prepared.file);
+    });
+    setImageFile(prepared.file);
+    setImageError(null);
+  };
   const openNewTask = () => {
     setShowNewTask(true);
     setAudioBlob(null);
@@ -350,6 +392,7 @@ export default function DashboardPage() {
     setTypedText('');
     setTypedPriority('medium');
     setTypedDeadline('');
+    clearImageDraft();
   };
   const finishCreate = async (data: { task?: Task; ai_error?: string | null }, currentUser: User) => {
     setShowNewTask(false);
@@ -359,10 +402,15 @@ export default function DashboardPage() {
     setVoiceUnclear(null);
     setConfirmUnclear(false);
     setTypedText('');
+    clearImageDraft();
     if (data.ai_error) setError('Task saved, but transcription failed.');
     else if (data.task?.assignee_name) setNotice(`Assigned to ${data.task.assignee_name}.`);
     await fetchTasks();
-    const canOpen = data.task?.id && (currentUser.role === 'boss' || data.task.assignee_id === currentUser.id);
+    const canOpen = data.task?.id && (
+      currentUser.role === 'boss' ||
+      data.task.assignee_id === currentUser.id ||
+      data.task.created_by === currentUser.id
+    );
     if (canOpen && data.task?.id) await loadTaskDetail(data.task.id);
   };
   const beginCreate = () => {
@@ -376,6 +424,17 @@ export default function DashboardPage() {
   const endCreate = () => {
     createInFlightRef.current = false;
     setProcessing(false);
+  };
+  const attachImageIfAny = async (task: Task | undefined): Promise<string | null> => {
+    if (!task?.id || !imageFile) return null;
+    setImageProgress(0);
+    const result = await uploadTaskImage(task.id, imageFile, setImageProgress);
+    setImageProgress(null);
+    if (!result.ok || !result.image_path) {
+      return result.error || 'Photo upload failed. The task is saved — tap Add screenshot on the task to retry.';
+    }
+    task.image_path = result.image_path;
+    return null;
   };
   const createTask = async (overrideAssigneeId?: string, opts?: { confirmUnclear?: boolean }) => {
     if (!audioBlob || createInFlightRef.current) return;
@@ -412,7 +471,12 @@ export default function DashboardPage() {
       }
       setNeedAssignee(false);
       setVoiceUnclear(null);
+      const imageErr = await attachImageIfAny(data.task as Task | undefined);
       if (user) await finishCreate(data, user);
+      if (imageErr) {
+        setDetailImageError(imageErr);
+        setError(imageErr);
+      }
     } catch (e) { setError((e as Error).message); } finally { endCreate(); }
   };
   const createTypedTask = async () => {
@@ -427,13 +491,59 @@ export default function DashboardPage() {
       const res = await fetch('/api/tasks', { method: 'POST', body: form });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to create reminder');
+      const imageErr = await attachImageIfAny(data.task as Task | undefined);
       if (user) await finishCreate(data, user);
+      if (imageErr) {
+        setDetailImageError(imageErr);
+        setError(imageErr);
+      }
     } catch (e) { setError((e as Error).message); } finally { endCreate(); }
   };
 
   /* ── Task actions ── */
 
-  const loadTaskDetail = async (id: string) => { const r = await fetch(`/api/tasks/${id}`); const d = await r.json(); setSelectedTask(d.task); setReplies(d.replies || []); setMobileDetail(true); };
+  const loadTaskDetail = useCallback(async (id: string) => {
+    setDetailImageError(null);
+    const r = await fetch(`/api/tasks/${id}`);
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.task) {
+      if (r.status !== 401) setError(d.error || 'Could not open that task');
+      return;
+    }
+    setSelectedTask(d.task);
+    setReplies(d.replies || []);
+    setMobileDetail(true);
+  }, []);
+  useEffect(() => {
+    if (!user) return;
+    const taskId = new URLSearchParams(window.location.search).get('task');
+    if (!taskId || openedTaskRef.current === taskId) return;
+    openedTaskRef.current = taskId;
+    void loadTaskDetail(taskId);
+  }, [user, loadTaskDetail]);
+  const replaceTaskImage = async (taskId: string, file: File) => {
+    setDetailImageBusy(true);
+    setDetailImageError(null);
+    setDetailImageProgress(0);
+    try {
+      const prepared = await prepareTaskImage(file);
+      if (prepared.error) {
+        setDetailImageError(prepared.error);
+        return;
+      }
+      const result = await uploadTaskImage(taskId, prepared.file, setDetailImageProgress);
+      if (!result.ok || !result.image_path) {
+        setDetailImageError(result.error || 'Photo upload failed. Tap Replace screenshot to retry.');
+        return;
+      }
+      const updatedAt = new Date().toISOString();
+      setSelectedTask((prev) => prev && prev.id === taskId ? { ...prev, image_path: result.image_path, updated_at: updatedAt } : prev);
+      setTasks((prev) => prev.map((task) => task.id === taskId ? { ...task, image_path: result.image_path, updated_at: updatedAt } : task));
+    } finally {
+      setDetailImageBusy(false);
+      setDetailImageProgress(null);
+    }
+  };
   const updateStatus = async (id: string, status: string) => { await fetch(`/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); fetchTasks(); if (selectedTask?.id === id) setSelectedTask(prev => prev ? { ...prev, status } : null); };
   const reassignTask = async (id: string, nextAssigneeId: string) => {
     if (!nextAssigneeId) return;
@@ -494,6 +604,9 @@ export default function DashboardPage() {
     return (
       <div key={task.id} onClick={() => loadTaskDetail(task.id)}
         className={`group card p-3 cursor-pointer transition-all hover:border-zinc-600 hover:bg-[var(--surface-raised)] active:scale-[0.98] ${selectedTask?.id === task.id ? 'ring-1 ring-violet-500/50 border-violet-500/40' : ''}`}>
+        {task.image_path && (
+          <img src={taskImageSrc(task)} alt="Screenshot" className="w-full h-36 object-contain rounded-md mb-2 bg-zinc-950 border border-zinc-800" />
+        )}
         <div className="flex items-start gap-2">
           <PriorityDot level={task.priority} />
           <div className="min-w-0 flex-1">
@@ -544,6 +657,14 @@ export default function DashboardPage() {
           <button onClick={() => setConfirmDelete(t)} className="p-1.5 text-zinc-700 hover:text-red-400 hover:bg-red-950/30 rounded-md transition-colors" title="Delete"><TrashIcon/></button>
         </div>
       </div>
+
+      <TaskScreenshot
+        src={t.image_path ? taskImageSrc(t) : ''}
+        busy={detailImageBusy}
+        progress={detailImageProgress}
+        error={detailImageError}
+        onFile={(file) => { void replaceTaskImage(t.id, file); }}
+      />
 
       <div className="flex items-center gap-2 mb-5">
         <span className={`px-2 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wider ${t.priority === 'high' ? 'bg-red-950/60 text-red-400' : t.priority === 'medium' ? 'bg-amber-950/50 text-amber-400' : 'bg-zinc-800 text-zinc-500'}`}>{t.priority}</span>
@@ -718,23 +839,33 @@ export default function DashboardPage() {
       <PushEnableBanner />
 
       {/* ═══════ BANNERS ═══════ */}
-      {processing && <div className="h-8 bg-violet-950/40 border-b border-violet-800/40 text-violet-300 text-[12px] flex items-center justify-center gap-2 flex-shrink-0"><Spinner />{showNewTask || needAssignee ? 'Creating…' : createMode === 'typed' ? 'Saving reminder…' : 'Processing voice note…'}</div>}
+      {processing && <div className="h-8 bg-violet-950/40 border-b border-violet-800/40 text-violet-300 text-[12px] flex items-center justify-center gap-2 flex-shrink-0"><Spinner />{imageProgress !== null ? `Uploading photo… ${imageProgress}%` : showNewTask || needAssignee ? 'Creating…' : createMode === 'typed' ? 'Saving reminder…' : 'Processing voice note…'}</div>}
       {error && <div className="bg-[var(--danger-soft)] border-b border-red-900/30 text-red-400 text-[12px] flex items-center px-4 py-2 flex-shrink-0"><AlertIcon /><span className="flex-1 ml-2">{error}</span><button onClick={() => setError(null)} className="text-red-500/70 hover:text-red-400 ml-3">Dismiss</button></div>}
       {notice && <div className="bg-emerald-950/30 border-b border-emerald-900/30 text-emerald-400 text-[12px] flex items-center px-4 py-2 flex-shrink-0"><span className="flex-1">{notice}</span><button onClick={() => setNotice(null)} className="text-emerald-500/70 hover:text-emerald-400 ml-3">Dismiss</button></div>}
 
       {/* ═══════ TOOLBAR ═══════ */}
-      <div className="h-11 flex items-center gap-2 px-4 border-b border-[var(--border)] bg-[var(--surface)] flex-shrink-0">
+      <div className="min-h-11 flex items-center gap-2 px-4 py-1.5 border-b border-[var(--border)] bg-[var(--surface)] flex-shrink-0 flex-wrap">
+        {isBoss && (
+          <button
+            type="button"
+            aria-pressed={filterAssignee === user.id}
+            onClick={() => setFilterAssignee(filterAssignee === user.id ? '' : user.id)}
+            className={`px-2.5 py-1 rounded-md text-[12px] font-medium border ${filterAssignee === user.id ? 'bg-violet-600 border-violet-500 text-white' : 'bg-zinc-900 border-zinc-700 text-zinc-300'}`}
+          >
+            Assigned to me
+          </button>
+        )}
         {isBoss && (
           <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} className="input-field px-2.5 py-1 text-[12px] w-auto cursor-pointer">
             <option value="">Everyone</option>
             {users.filter(u => u.role === 'member').length > 0 && (
               <optgroup label="Staff">
-                {users.filter(u => u.role === 'member').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                {users.filter(u => u.role === 'member').map(u => <option key={u.id} value={u.id}>{assigneeOptionLabel(u)}</option>)}
               </optgroup>
             )}
             {users.filter(u => u.role === 'boss').length > 0 && (
               <optgroup label="Boss">
-                {users.filter(u => u.role === 'boss').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                {users.filter(u => u.role === 'boss').map(u => <option key={u.id} value={u.id}>{assigneeOptionLabel(u)}</option>)}
               </optgroup>
             )}
           </select>
@@ -853,7 +984,7 @@ export default function DashboardPage() {
             {processing && (
               <div className="absolute inset-0 z-10 rounded-[inherit] bg-black/55 backdrop-blur-[1px] flex flex-col items-center justify-center gap-2">
                 <Spinner className="w-6 h-6 border-[2.5px] border-violet-300" />
-                <p className="text-[13px] font-medium text-zinc-100">Creating…</p>
+                <p className="text-[13px] font-medium text-zinc-100">{imageProgress !== null ? `Uploading photo… ${imageProgress}%` : 'Creating…'}</p>
                 <p className="text-[11px] text-zinc-400">Please wait — do not tap again.</p>
               </div>
             )}
@@ -876,8 +1007,9 @@ export default function DashboardPage() {
                 <div className="text-left mb-3">
                   <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Assign to (optional)</label>
                   <AssigneeSelect users={users} value={assigneeId} onChange={setAssigneeId} includeAuto autoLabel="Auto from voice" disabled={processing} />
-                  <p className="text-[11px] text-zinc-600 mt-1.5 leading-relaxed">Optional. If the voice note does not name anyone, we will ask who it is for.</p>
+                  <p className="text-[11px] text-zinc-600 mt-1.5 leading-relaxed">Optional. If the voice note does not name anyone, we will ask who it is for. Boss accounts are listed under Boss.</p>
                 </div>
+                <TaskImageField previewUrl={imagePreview} error={imageError} progress={imageProgress} disabled={processing} onFile={(file) => { void onPickImage(file); }} onClear={clearImageDraft} />
                 {!audioBlob ? (
                   <button disabled={processing} onClick={recording ? stopRecording : startRecording} className={`w-full py-2.5 rounded-lg text-[13px] font-medium transition-all duration-200 disabled:opacity-40 ${recording ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-[0_2px_8px_rgb(99_102_241/0.3)]'}`}>
                     {recording ? 'Stop Recording' : 'Start Recording'}
@@ -909,6 +1041,7 @@ export default function DashboardPage() {
                   <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Assign to</label>
                   <AssigneeSelect users={users} value={assigneeId} onChange={setAssigneeId} disabled={processing} />
                 </div>
+                <TaskImageField previewUrl={imagePreview} error={imageError} progress={imageProgress} disabled={processing} onFile={(file) => { void onPickImage(file); }} onClear={clearImageDraft} />
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Priority</label>

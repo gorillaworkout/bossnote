@@ -2,6 +2,9 @@ import webpush from 'web-push';
 import { v4 as uuidv4 } from 'uuid';
 import { execute, queryAll, queryOne } from '@/lib/database';
 import { buildDigestPayload, groupOpenTasksByAssignee, OPEN_TASK_STATUSES } from '@/lib/push-digest';
+import { uniqueSubscriptions } from '@/lib/push-targets';
+
+export { uniqueSubscriptions } from '@/lib/push-targets';
 
 export type PushPayload = {
   title: string;
@@ -100,10 +103,10 @@ export async function sendPushToUser(
 ): Promise<{ sent: number; removed: number }> {
   if (!ensureVapid()) return { sent: 0, removed: 0 };
 
-  const subs = await queryAll<StoredSub>(
+  const subs = uniqueSubscriptions(await queryAll<StoredSub>(
     'SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?',
     [userId],
-  );
+  ));
   if (subs.length === 0) return { sent: 0, removed: 0 };
 
   const body = JSON.stringify({

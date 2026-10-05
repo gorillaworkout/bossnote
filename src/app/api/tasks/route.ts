@@ -17,6 +17,7 @@ import {
 } from '@/lib/voice-clarity';
 import { sendPushToUser } from '@/lib/push';
 import { notifyLarkTask } from '@/lib/lark';
+import { assignmentPushUrl } from '@/lib/task-access';
 import { saveVoice, voiceExt } from '@/lib/voice-storage';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -130,6 +131,7 @@ async function loadCreatedTask(taskId: string) {
 function notifyAssignee(
   assigneeId: string,
   title: string,
+  taskId: string,
   extra?: {
     assigneeName?: string;
     assigneeOpenId?: string | null;
@@ -141,7 +143,7 @@ function notifyAssignee(
   void sendPushToUser(assigneeId, {
     title: 'New task',
     body: title,
-    url: '/dashboard',
+    url: assignmentPushUrl(taskId),
   }).catch((err) => {
     console.error('[bossnote] push after create failed:', err);
   });
@@ -153,6 +155,7 @@ function notifyAssignee(
     assigneeId,
     assigneeOpenId: extra?.assigneeOpenId,
     priority: extra?.priority,
+    taskId,
   });
 }
 
@@ -221,7 +224,7 @@ export async function POST(request: NextRequest) {
     );
 
     const task = await loadCreatedTask(taskId);
-    notifyAssignee(formUser.id, fields.title || fields.title_id, {
+    notifyAssignee(formUser.id, fields.title || fields.title_id, taskId, {
       assigneeName: formUser.name,
       assigneeOpenId: formUser.lark_open_id,
       priority: fields.priority,
@@ -308,7 +311,7 @@ export async function POST(request: NextRequest) {
 
   const task = await loadCreatedTask(taskId);
   const assigneeName = assignee.name;
-  notifyAssignee(assigneeId, title || titleId, {
+  notifyAssignee(assigneeId, title || titleId, taskId, {
     assigneeName,
     assigneeOpenId: assignee.lark_open_id,
     priority: ai?.priority ?? 'medium',

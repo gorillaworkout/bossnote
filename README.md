@@ -37,8 +37,8 @@ Add those to `.env` on the server. Also required: `DATABASE_URL`, `JWT_SECRET`, 
 
 ### Phone notes
 
-- **Android Chrome:** Allow notifications when prompted (or tap **Enable** on the banner).
-- **iOS Safari:** Add to Home Screen first. Web Push only works for the installed PWA, then grant notifications.
+- **Android Chrome:** Allow notifications when prompted (or tap **Enable Push** on the banner).
+- **iOS Safari:** Add to Home Screen first. Web Push only works for the installed PWA. The banner says **Add to Home Screen** until the app is opened from the icon, then tap **Enable Push**. Each device stores its own subscription; a new phone does not replace the Mac.
 
 After login, the dashboard registers `/sw.js?v=8` (`bossnote-v8`). `/api/`, document navigations, and `/manifest.json` are network-only so the `bn_token` session cookie is not dropped on reopen. Non-http(s) schemes (e.g. `chrome-extension://`) are left unhandled so `Cache.put` does not throw. Push subscription is stored at `POST /api/push/subscribe`. `POST /api/push/test` sends a test notification to the current user.
 
@@ -82,7 +82,7 @@ LARK_OPEN_IDS=Bayu:ou_xxx,Ian:ou_yyy
 2. `LARK_OPEN_IDS` — `Name:ou_xxx` or `bossnote-user-id:ou_xxx` (comma list or JSON object). Use this if chat-member lookup is blocked.
 3. Group member list — `GET /im/v1/chats/{chat_id}/members` matched to the BossNote name (case-insensitive). Needs the bot scope to view group members. Cached a few minutes.
 
-How to get an `ou_…` open_id: Lark Admin / Open Platform (user open_id for this app), or inspect a message the person sent in the group. Names must match the Lark display name for automatic lookup (Bayu, Ian, Prista, Sandra).
+How to get an `ou_…` open_id: Lark Admin / Open Platform (user open_id for this app), or inspect a message the person sent in the group. Lookup matches the BossNote name to the Lark display name, including a unique first name (`Bayu` ↔ `Bayu Darmawan`). Two people sharing that first name are not guessed. Names on the team: Bayu, Ian, Prista, Sandra.
 
 If any required Lark var is missing, create/reassign still succeeds; Lark is skipped (one warning log). The custom app bot must be in the group and allowed to send messages.
 
@@ -103,15 +103,20 @@ Any logged-in user (member or boss) can create:
 - **Voice** — same AI pipeline (Gemini 3.7 default + `assignee_hint`). Assignee can be staff or boss. Auto-from-voice still works. A form-selected assignee wins over the AI name hint. If neither resolves, `POST /api/tasks` returns `400` with `code: assignee_required` and the dashboard asks **Who is this task for?** then retries the same recording with `assignee_id`.
 - **Type** — typed title/reminder, no LLM. Works when Gemini is down. `POST /api/tasks` with `text` / `title` (+ `assignee_id`, optional `priority`, `deadline`). JSON body is also accepted.
 
-On create (and reassign), the assignee gets a fire-and-forget push: title `New task`, body = English task title. The same events also post an English text message to the Lark group when Lark env is set (see **Lark group notify** above).
+On create (and reassign), the assignee gets a fire-and-forget push to **every** stored device: title `New task`, body = English task title, tap opens that task. The same events also post an English text message to the Lark group when Lark env is set (see **Lark group notify** above).
 
-Members still only see tasks assigned to them. Bosses see the full board.
+Members still only see tasks assigned to them. Bosses open on **Assigned to me** (one tap back to Everyone). The assignee picker lists staff and every Boss account as `Name (Boss)`.
+
+### Screenshots
+
+Create and edit accept an optional photo (JPEG, PNG, WebP, GIF, or HEIC). It is not required: if the upload fails, the task is still saved and the task screen shows **Add screenshot** / **Replace screenshot** to retry. The photo is on the task card and at the top of the task. Files live in `IMAGE_UPLOAD_DIR` (default `public/uploads/images`; on Oracle use a path outside the repo, same idea as voice notes). Apply `migrations/009_task_image.sql`.
 
 ## Deploy notes
 
 1. `npm i`
-2. Apply `migrations/007_push_subscriptions.sql` and `migrations/008_lark_open_id.sql`
-3. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`, `LARK_OPEN_IDS`)
-4. Install the crontab line above
-5. Rebuild / restart (`npm run build && npm start` or your Oracle process manager)
-6. Installed PWAs pick up `bossnote-v8` after the next visit
+2. Apply `migrations/007_push_subscriptions.sql`, `migrations/008_lark_open_id.sql`, and `migrations/009_task_image.sql`
+3. Optional: `IMAGE_UPLOAD_DIR=/home/ubuntu/data/bossnote-images` (create the directory; do not commit photos)
+4. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`, `LARK_OPEN_IDS`)
+5. Install the crontab line above
+6. Rebuild / restart (`npm run build && npm start` or your Oracle process manager)
+7. Installed PWAs pick up `bossnote-v8` after the next visit
