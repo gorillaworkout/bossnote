@@ -9,6 +9,7 @@ const dashboard = readFileSync(join(root, 'src/app/dashboard/page.tsx'), 'utf8')
 const imageField = readFileSync(join(root, 'src/components/TaskImageField.tsx'), 'utf8');
 const screenshot = readFileSync(join(root, 'src/components/TaskScreenshot.tsx'), 'utf8');
 const tasksRoute = readFileSync(join(root, 'src/app/api/tasks/route.ts'), 'utf8');
+const taskListScope = readFileSync(join(root, 'src/lib/task-list-scope.ts'), 'utf8');
 const taskRoute = readFileSync(join(root, 'src/app/api/tasks/[id]/route.ts'), 'utf8');
 const imageRoute = readFileSync(join(root, 'src/app/api/tasks/[id]/image/route.ts'), 'utf8');
 const push = readFileSync(join(root, 'src/lib/push.ts'), 'utf8');
@@ -17,10 +18,28 @@ const sw = readFileSync(join(root, 'public/sw.js'), 'utf8');
 
 describe('boss assigned-to-me board', () => {
   it('defaults bosses to their own assignments and labels Boss accounts', () => {
-    assert.match(dashboard, /defaultBossAssigneeFilter/);
-    assert.match(dashboard, /Assigned to me/);
+    assert.match(dashboard, /resolveTaskListScope/);
+    assert.match(taskListScope, /if \(!user \|\| user\.role === 'boss'\) return 'assigned'/);
+    assert.match(taskListScope, /Assigned to me/);
+    assert.match(taskListScope, /Created by me/);
     assert.match(dashboard, /assigneeOptionLabel/);
     assert.match(dashboard, /optgroup label="Boss"/);
+  });
+
+  it('offers Assigned, Created by me, and All without leaking other members tasks', () => {
+    assert.match(dashboard, /role="tablist"/);
+    assert.match(dashboard, /grid grid-cols-3/);
+    assert.match(dashboard, /aria-label="Tasks"/);
+    assert.match(dashboard, /taskListScopeLabel/);
+    assert.match(dashboard, /emptyTaskScopeMessage/);
+    assert.match(dashboard, /TASK_LIST_SCOPE_STORAGE_KEY/);
+    assert.match(dashboard, /params\.set\('scope', taskScope\)/);
+    assert.match(dashboard, /taskScope === 'all'/);
+    assert.match(taskListScope, /No tasks created by you/);
+    assert.match(taskListScope, /No tasks assigned to you/);
+    assert.match(taskListScope, /\(t\.assignee_id = \? OR t\.created_by = \?\)/);
+    assert.match(tasksRoute, /buildTaskListQuery/);
+    assert.match(tasksRoute, /searchParams\.get\('scope'\)/);
   });
 });
 

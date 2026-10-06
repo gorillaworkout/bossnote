@@ -5,7 +5,15 @@ import { DashboardHeader } from '@/components/DashboardHeader';
 import { PushEnableBanner } from '@/components/PushEnableBanner';
 import { VoicePlayer } from '@/components/VoicePlayer';
 import { taskTitles } from '@/lib/task-title';
-import { assigneeOptionLabel, defaultBossAssigneeFilter, isAssigneeRequiredError } from '@/lib/assignee';
+import { assigneeOptionLabel, isAssigneeRequiredError } from '@/lib/assignee';
+import {
+  emptyTaskScopeMessage,
+  resolveTaskListScope,
+  TASK_LIST_SCOPES,
+  TASK_LIST_SCOPE_STORAGE_KEY,
+  taskListScopeLabel,
+  type TaskListScope,
+} from '@/lib/task-list-scope';
 import { taskImageSrc } from '@/lib/task-image';
 import { prepareTaskImage } from '@/lib/prepare-task-image';
 import { hasUsableTaskText, isVoiceUnclearError } from '@/lib/voice-clarity';
@@ -269,6 +277,7 @@ export default function DashboardPage() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [replies, setReplies] = useState<Reply[]>([]);
   const [filterAssignee, setFilterAssignee] = useState('');
+  const [taskScope, setTaskScope] = useState<TaskListScope | null>(null);
   const [filterStatus, setFilterStatus] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [aiModel, setAiModel] = useState('ag/gemini-3.7-flash-high');
@@ -314,19 +323,24 @@ export default function DashboardPage() {
   /* ── Data fetching ── */
 
   const fetchTasks = useCallback(async () => {
+    if (!taskScope) return;
     const params = new URLSearchParams();
-    if (filterAssignee) params.set('assignee', filterAssignee);
+    params.set('scope', taskScope);
+    if (filterAssignee && taskScope === 'all') params.set('assignee', filterAssignee);
     if (filterStatus) params.set('status', filterStatus);
     if (searchQuery.trim()) params.set('search', searchQuery.trim());
     const res = await fetch(`/api/tasks?${params}`);
     setTasks((await res.json()).tasks || []);
-  }, [filterAssignee, filterStatus, searchQuery]);
+  }, [filterAssignee, filterStatus, searchQuery, taskScope]);
 
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' }).then(r => r.json()).then(d => {
       if (!d.user) { window.location.href = '/'; return; }
       setUser(d.user);
-      setFilterAssignee(defaultBossAssigneeFilter(d.user));
+      const params = new URLSearchParams(window.location.search);
+      let storedScope: string | null = null;
+      try { storedScope = localStorage.getItem(TASK_LIST_SCOPE_STORAGE_KEY); } catch { storedScope = null; }
+      setTaskScope(resolveTaskListScope(params.get('scope'), storedScope, d.user));
       fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users || []));
       fetch('/api/settings/model').then(r => r.json()).then(d => {
         const options: string[] = Array.isArray(d.options) && d.options.length ? d.options : ['ag/gemini-3.7-flash-high'];
@@ -337,7 +351,16 @@ export default function DashboardPage() {
     }).finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { if (user) fetchTasks(); }, [user, fetchTasks]);
+  useEffect(() => { if (user && taskScope) fetchTasks(); }, [user, taskScope, fetchTasks]);
+
+  useEffect(() => {
+    if (!taskScope) return;
+    try { localStorage.setItem(TASK_LIST_SCOPE_STORAGE_KEY, taskScope); } catch { /* private mode */ }
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('scope') === taskScope) return;
+    url.searchParams.set('scope', taskScope);
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [taskScope]);
 
   /* ── Recording ── */
 
@@ -593,6 +616,7 @@ export default function DashboardPage() {
 
   const pendingCount = tasks.filter(t => (t.questions?.length || 0) > (t.answered_questions?.length || 0)).length;
   const waitingCount = tasks.filter(t => t.status === 'waiting').length;
+  const scopeEmptyMessage = emptyTaskScopeMessage(taskScope ?? (user?.role === 'boss' ? 'assigned' : 'created'));
 
   if (loading) return <div className="bg-[var(--bg)] min-h-screen flex items-center justify-center"><p className="text-sm text-zinc-600 animate-pulse">Loading…</p></div>;
   if (!user) return null;
@@ -844,18 +868,23 @@ export default function DashboardPage() {
       {notice && <div className="bg-emerald-950/30 border-b border-emerald-900/30 text-emerald-400 text-[12px] flex items-center px-4 py-2 flex-shrink-0"><span className="flex-1">{notice}</span><button onClick={() => setNotice(null)} className="text-emerald-500/70 hover:text-emerald-400 ml-3">Dismiss</button></div>}
 
       {/* ═══════ TOOLBAR ═══════ */}
-      <div className="min-h-11 flex items-center gap-2 px-4 py-1.5 border-b border-[var(--border)] bg-[var(--surface)] flex-shrink-0 flex-wrap">
-        {isBoss && (
-          <button
-            type="button"
-            aria-pressed={filterAssignee === user.id}
-            onClick={() => setFilterAssignee(filterAssignee === user.id ? '' : user.id)}
-            className={`px-2.5 py-1 rounded-md text-[12px] font-medium border ${filterAssignee === user.id ? 'bg-violet-600 border-violet-500 text-white' : 'bg-zinc-900 border-zinc-700 text-zinc-300'}`}
-          >
-            Assigned to me
-          </button>
-        )}
-        {isBoss && (
+      <div className="border-b border-[var(--border)] bg-[var(--surface)] flex-shrink-0">
+        <div role="tablist" aria-label="Tasks" className="grid grid-cols-3 gap-1 p-2">
+          {TASK_LIST_SCOPES.map((id) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={taskScope === id}
+              onClick={() => setTaskScope(id)}
+              className={`min-h-11 px-1.5 py-1.5 rounded-lg text-[12px] font-medium text-center leading-tight transition-colors ${taskScope === id ? 'bg-violet-600 text-white' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
+            >
+              {taskListScopeLabel(id)}
+            </button>
+          ))}
+        </div>
+        <div className="min-h-11 flex items-center gap-2 px-4 pb-2 flex-wrap">
+        {isBoss && taskScope === 'all' && (
           <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} className="input-field px-2.5 py-1 text-[12px] w-auto cursor-pointer">
             <option value="">Everyone</option>
             {users.filter(u => u.role === 'member').length > 0 && (
@@ -881,6 +910,7 @@ export default function DashboardPage() {
           <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search…" className="input-field pl-3 pr-7 py-1 text-[12px] w-36"/>
           {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 text-[10px]">✕</button>}
         </div>
+        </div>
       </div>
 
       {/* ═══════ BODY ═══════ */}
@@ -905,7 +935,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex-1 overflow-y-auto p-2 space-y-2">
                     {colTasks.length === 0 ? (
-                      <div className="flex items-center justify-center h-20 text-[11px] text-zinc-700 italic">No tasks</div>
+                      <div className="flex items-center justify-center h-20 px-2 text-center text-[11px] text-zinc-700 italic">{tasks.length === 0 ? scopeEmptyMessage : 'No tasks'}</div>
                     ) : (colTasks.map(task => renderKanbanCard(task)))}
                   </div>
                 </div>
@@ -936,7 +966,9 @@ export default function DashboardPage() {
           </div>
           {/* Active tab cards */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {(tasks.filter(t => t.status === kanbanTab).length === 0) ? (
+            {tasks.length === 0 ? (
+              <div className="flex items-center justify-center py-16 px-6 text-center text-[13px] text-zinc-500">{scopeEmptyMessage}</div>
+            ) : tasks.filter(t => t.status === kanbanTab).length === 0 ? (
               <div className="flex items-center justify-center py-16 text-[12px] text-zinc-600 italic">No tasks here</div>
             ) : tasks.filter(t => t.status === kanbanTab).map(task => renderKanbanCard(task))}
           </div>
