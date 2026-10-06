@@ -51,7 +51,11 @@ describe('task screenshot', () => {
     assert.match(screenshot, /Add screenshot/);
     assert.match(imageField, /the task is still saved and you can retry/);
     assert.match(imageRoute, /canViewTask/);
-    assert.match(imageRoute, /saveTaskImage/);
+    assert.match(imageRoute, /appendTaskImage/);
+    assert.match(imageRoute, /image_paths/);
+    assert.match(imageField, /multiple/);
+    assert.match(screenshot, /multiple/);
+    assert.match(dashboard, /taskImageSources/);
     assert.match(taskRoute, /canViewTask/);
   });
 
