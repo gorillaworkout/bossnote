@@ -2,6 +2,7 @@ export type ImageUploadResult = {
   ok: boolean;
   error?: string;
   image_path?: string;
+  image_paths?: string[];
 };
 
 /** Upload with progress. A failed photo never rolls back the task. */
@@ -25,15 +26,18 @@ export function uploadTaskImage(
       });
     };
     xhr.onload = () => {
-      let data: { error?: string; image_path?: string } = {};
+      let data: { error?: string; image_path?: string; image_paths?: unknown } = {};
       try {
-        data = JSON.parse(xhr.responseText || '{}') as { error?: string; image_path?: string };
+        data = JSON.parse(xhr.responseText || '{}') as { error?: string; image_path?: string; image_paths?: unknown };
       } catch {
         data = {};
       }
+      const imagePaths = Array.isArray(data.image_paths)
+        ? data.image_paths.filter((item): item is string => typeof item === 'string' && item.length > 0)
+        : undefined;
       if (xhr.status >= 200 && xhr.status < 300 && data.image_path) {
         onProgress?.(100);
-        resolve({ ok: true, image_path: data.image_path });
+        resolve({ ok: true, image_path: data.image_path, image_paths: imagePaths });
         return;
       }
       resolve({

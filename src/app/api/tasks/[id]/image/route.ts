@@ -1,19 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
-import { execute, queryOne } from '@/lib/database';
-import { deleteTaskImage, readTaskImage, saveTaskImage } from '@/lib/image-storage';
+import { appendTaskImage, deleteTaskImageSlot, readTaskImageAt } from '@/lib/image-storage';
 import { canViewTask } from '@/lib/task-access';
+import { loadTaskForImage, saveTaskGallery } from '@/lib/task-gallery';
+import { imageFileResponse } from '@/lib/task-image-response';
+import {
+  TASK_IMAGE_MAX_COUNT,
+  imageIndexFromPublicPath,
+  taskImagePaths,
+} from '@/lib/task-image';
 
 export const dynamic = 'force-dynamic';
-
-type TaskRow = { id: string; assignee_id: string; created_by: string; image_path: string | null };
-
-async function loadTask(id: string): Promise<TaskRow | undefined> {
-  return queryOne<TaskRow>(
-    'SELECT id, assignee_id, created_by, image_path FROM tasks WHERE id = ?',
-    [id],
-  );
-}
 
 export async function GET(
   _request: NextRequest,
@@ -23,22 +20,15 @@ export async function GET(
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const task = await loadTask(id);
-  if (!task || !task.image_path) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const task = await loadTaskForImage(id);
+  const paths = task ? taskImagePaths(task) : [];
+  if (!task || paths.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (!canViewTask(user, task)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const file = readTaskImage(id);
+  const index = imageIndexFromPublicPath(id, paths[0]) ?? 0;
+  const file = readTaskImageAt(id, index);
   if (!file) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
-  return new NextResponse(new Uint8Array(file.buffer), {
-    headers: {
-      'Content-Type': file.contentType,
-      'Content-Length': String(file.buffer.length),
-      'Cache-Control': 'private, no-cache',
-      'Content-Disposition': 'inline',
-      'X-Content-Type-Options': 'nosniff',
-    },
-  });
+  return imageFileResponse(file);
 }
 
 export async function POST(
@@ -49,7 +39,7 @@ export async function POST(
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const task = await loadTask(id);
+  const task = await loadTaskForImage(id);
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (!canViewTask(user, task)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
@@ -64,33 +54,61 @@ export async function POST(
     );
   }
 
-  const image = formData.get('image');
-  if (!(image instanceof File) || image.size <= 0) {
+  const images = formData.getAll('image').filter((item): item is File => item instanceof File && item.size > 0);
+  if (images.length === 0) {
     return NextResponse.json({ error: 'Choose a photo to upload.' }, { status: 400 });
   }
 
-  let saved: { publicPath: string };
-  try {
-    const buffer = Buffer.from(await image.arrayBuffer());
-    saved = saveTaskImage(id, buffer);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Could not save the photo.';
-    return NextResponse.json({ error: message }, { status: 400 });
+  const savedPaths = taskImagePaths(task);
+  const added: { index: number }[] = [];
+  const failed: { name: string; error: string }[] = [];
+
+  for (const image of images) {
+    if (savedPaths.length >= TASK_IMAGE_MAX_COUNT) {
+      failed.push({
+        name: image.name || 'screenshot',
+        error: `You can attach up to ${TASK_IMAGE_MAX_COUNT} screenshots.`,
+      });
+      continue;
+    }
+    try {
+      const buffer = Buffer.from(await image.arrayBuffer());
+      const stored = appendTaskImage(id, buffer, savedPaths);
+      savedPaths.push(stored.publicPath);
+      added.push({ index: stored.index });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not save the photo.';
+      failed.push({ name: image.name || 'screenshot', error: message });
+    }
+  }
+
+  if (added.length === 0) {
+    return NextResponse.json(
+      { error: failed[0]?.error || 'Could not save the photo.', failed },
+      { status: 400 },
+    );
   }
 
   try {
-    await execute(
-      'UPDATE tasks SET image_path = ?, updated_at = NOW() WHERE id = ?',
-      [saved.publicPath, id],
-    );
+    await saveTaskGallery(id, savedPaths);
   } catch (err) {
     console.error('[bossnote] image update failed', err);
-    deleteTaskImage(id);
+    for (const item of added) deleteTaskImageSlot(id, item.index);
+    const migration = err instanceof Error && err.message.includes('010_task_images');
     return NextResponse.json(
-      { error: 'Could not attach the photo. The task is saved — retry the photo.' },
+      {
+        error: migration
+          ? err.message
+          : 'Could not attach the photo. The task is saved — retry the photo.',
+      },
       { status: 500 },
     );
   }
 
-  return NextResponse.json({ ok: true, image_path: saved.publicPath });
+  return NextResponse.json({
+    ok: true,
+    image_path: savedPaths[0],
+    image_paths: savedPaths,
+    failed,
+  });
 }

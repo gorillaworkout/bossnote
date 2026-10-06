@@ -14,10 +14,12 @@ import {
   taskListScopeLabel,
   type TaskListScope,
 } from '@/lib/task-list-scope';
-import { taskImageSrc } from '@/lib/task-image';
+import { TASK_IMAGE_MAX_COUNT, taskImagePaths, taskImageSlots, taskImageSources } from '@/lib/task-image';
 import { prepareTaskImage } from '@/lib/prepare-task-image';
 import { hasUsableTaskText, isVoiceUnclearError } from '@/lib/voice-clarity';
-import { uploadTaskImage } from '@/components/upload-task-image';
+import { uploadTaskImage, type ImageUploadResult } from '@/components/upload-task-image';
+import { DeadlineField } from '@/components/DeadlineField';
+import { confirmationAction, needsConfirmation, unansweredCount } from '@/lib/needs-confirmation';
 import { TaskImageField } from '@/components/TaskImageField';
 import { TaskScreenshot } from '@/components/TaskScreenshot';
 import { StatusButtons } from '@/components/StatusButtons';
@@ -40,6 +42,7 @@ interface Task {
   boss_name: string; assignee_name: string; assignee_id: string; created_by: string;
   created_at: string; updated_at?: string | null; reply_count: number;
   image_path?: string | null;
+  image_paths?: string[] | null;
 }
 interface Reply {
   id: string; user_id: string; user_name: string; voice_path: string;
@@ -264,6 +267,7 @@ export default function DashboardPage() {
   const [filterAssignee, setFilterAssignee] = useState('');
   const [taskScope, setTaskScope] = useState<TaskListScope | null>(null);
   const [filterStatus, setFilterStatus] = useState('');
+  const [needsConfirmationOnly, setNeedsConfirmationOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [aiModel, setAiModel] = useState('ag/gemini-3.7-flash-high');
   const [modelOptions, setModelOptions] = useState<string[]>(['ag/gemini-3.7-flash-high']);
@@ -279,8 +283,8 @@ export default function DashboardPage() {
   const [typedText, setTypedText] = useState('');
   const [typedPriority, setTypedPriority] = useState('medium');
   const [typedDeadline, setTypedDeadline] = useState('');
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [imageError, setImageError] = useState<string | null>(null);
   const [imageProgress, setImageProgress] = useState<number | null>(null);
   const [detailImageError, setDetailImageError] = useState<string | null>(null);
@@ -363,31 +367,61 @@ export default function DashboardPage() {
   };
   const stopRecording = () => { mediaRecorderRef.current?.stop(); setRecording(false); if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
   const clearImageDraft = () => {
-    setImagePreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return null;
+    setImagePreviews((prev) => {
+      for (const url of prev) URL.revokeObjectURL(url);
+      return [];
     });
-    setImageFile(null);
+    setImageFiles([]);
     setImageError(null);
     setImageProgress(null);
   };
-  const onPickImage = async (file: File | null) => {
-    if (!file) {
-      clearImageDraft();
-      return;
-    }
-    const prepared = await prepareTaskImage(file);
-    if (prepared.error) {
-      clearImageDraft();
-      setImageError(`${prepared.error} You can still create the task without it.`);
-      return;
-    }
-    setImagePreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return URL.createObjectURL(prepared.file);
+  const removeDraftImage = (index: number) => {
+    setImagePreviews((prev) => {
+      const url = prev[index];
+      if (url) URL.revokeObjectURL(url);
+      return prev.filter((_, i) => i !== index);
     });
-    setImageFile(prepared.file);
-    setImageError(null);
+    setImageFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+  const onPickImages = async (files: File[]) => {
+    if (!files.length) return;
+    const room = TASK_IMAGE_MAX_COUNT - imageFiles.length;
+    if (room <= 0) {
+      setImageError(`You can attach up to ${TASK_IMAGE_MAX_COUNT} screenshots. You can still create the task.`);
+      return;
+    }
+    const batch = files.slice(0, room);
+    const skipped = files.length - batch.length;
+    const errors: string[] = [];
+    const nextFiles: File[] = [];
+    const nextUrls: string[] = [];
+    for (const file of batch) {
+      const prepared = await prepareTaskImage(file);
+      if (prepared.error) {
+        errors.push(prepared.error);
+        continue;
+      }
+      nextFiles.push(prepared.file);
+      nextUrls.push(URL.createObjectURL(prepared.file));
+    }
+    if (nextFiles.length) {
+      setImageFiles((prev) => [...prev, ...nextFiles]);
+      setImagePreviews((prev) => [...prev, ...nextUrls]);
+    }
+    const notes = [...errors];
+    if (skipped > 0) notes.push(`Only ${TASK_IMAGE_MAX_COUNT} screenshots can be attached.`);
+    setImageError(notes.length ? `${notes.join(' ')} You can still create the task without the photos that failed.` : null);
+  };
+  const applyGallery = (task: Task, result: ImageUploadResult, updatedAt: string): Task => {
+    const paths = Array.isArray(result.image_paths)
+      ? result.image_paths
+      : taskImagePaths({ ...task, image_path: result.image_path || task.image_path });
+    return {
+      ...task,
+      image_path: result.image_path ?? paths[0] ?? null,
+      image_paths: paths,
+      updated_at: updatedAt,
+    };
   };
   const openNewTask = () => {
     setShowNewTask(true);
@@ -435,15 +469,26 @@ export default function DashboardPage() {
     setProcessing(false);
   };
   const attachImageIfAny = async (task: Task | undefined): Promise<string | null> => {
-    if (!task?.id || !imageFile) return null;
-    setImageProgress(0);
-    const result = await uploadTaskImage(task.id, imageFile, setImageProgress);
-    setImageProgress(null);
-    if (!result.ok || !result.image_path) {
-      return result.error || 'Photo upload failed. The task is saved — tap Add screenshot on the task to retry.';
+    if (!task?.id || imageFiles.length === 0) return null;
+    const errors: string[] = [];
+    let saved = 0;
+    for (let i = 0; i < imageFiles.length; i++) {
+      setImageProgress(Math.round((i / imageFiles.length) * 100));
+      const result = await uploadTaskImage(task.id, imageFiles[i], (percent) => {
+        setImageProgress(Math.min(99, Math.round(((i + percent / 100) / imageFiles.length) * 100)));
+      });
+      if (!result.ok || !result.image_path) {
+        errors.push(result.error || 'Photo upload failed. The task is saved — tap Add screenshot on the task to retry.');
+        continue;
+      }
+      saved += 1;
+      task.image_path = result.image_path;
+      if (result.image_paths) task.image_paths = result.image_paths;
     }
-    task.image_path = result.image_path;
-    return null;
+    setImageProgress(null);
+    if (errors.length === 0) return null;
+    if (saved === 0) return errors[0];
+    return `${saved} photo(s) saved. ${errors[0]}`;
   };
   const createTask = async (overrideAssigneeId?: string, opts?: { confirmUnclear?: boolean }) => {
     if (!audioBlob || createInFlightRef.current) return;
@@ -530,27 +575,60 @@ export default function DashboardPage() {
     openedTaskRef.current = taskId;
     void loadTaskDetail(taskId);
   }, [user, loadTaskDetail]);
-  const replaceTaskImage = async (taskId: string, file: File) => {
+  const addTaskImages = async (taskId: string, files: File[]) => {
+    if (!files.length) return;
     setDetailImageBusy(true);
     setDetailImageError(null);
     setDetailImageProgress(0);
+    const errors: string[] = [];
+    let saved = 0;
     try {
-      const prepared = await prepareTaskImage(file);
-      if (prepared.error) {
-        setDetailImageError(prepared.error);
-        return;
+      for (let i = 0; i < files.length; i++) {
+        const prepared = await prepareTaskImage(files[i]);
+        if (prepared.error) {
+          errors.push(prepared.error);
+          continue;
+        }
+        const result = await uploadTaskImage(taskId, prepared.file, (percent) => {
+          setDetailImageProgress(Math.min(99, Math.round(((i + percent / 100) / files.length) * 100)));
+        });
+        if (!result.ok || !result.image_path) {
+          errors.push(result.error || 'Photo upload failed. Tap Add screenshot to retry.');
+          continue;
+        }
+        saved += 1;
+        const updatedAt = new Date().toISOString();
+        setSelectedTask((prev) => prev && prev.id === taskId ? applyGallery(prev, result, updatedAt) : prev);
+        setTasks((prev) => prev.map((task) => task.id === taskId ? applyGallery(task, result, updatedAt) : task));
       }
-      const result = await uploadTaskImage(taskId, prepared.file, setDetailImageProgress);
-      if (!result.ok || !result.image_path) {
-        setDetailImageError(result.error || 'Photo upload failed. Tap Replace screenshot to retry.');
-        return;
+      if (errors.length) {
+        setDetailImageError(saved ? `${saved} photo(s) saved. ${errors[0]}` : errors[0]);
       }
-      const updatedAt = new Date().toISOString();
-      setSelectedTask((prev) => prev && prev.id === taskId ? { ...prev, image_path: result.image_path, updated_at: updatedAt } : prev);
-      setTasks((prev) => prev.map((task) => task.id === taskId ? { ...task, image_path: result.image_path, updated_at: updatedAt } : task));
     } finally {
       setDetailImageBusy(false);
       setDetailImageProgress(null);
+    }
+  };
+  const removeTaskImage = async (taskId: string, index: number) => {
+    setDetailImageBusy(true);
+    setDetailImageError(null);
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/image/${index}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setDetailImageError(typeof data.error === 'string' ? data.error : 'Could not remove that photo.');
+        return;
+      }
+      const updatedAt = new Date().toISOString();
+      const result: ImageUploadResult = {
+        ok: true,
+        image_path: typeof data.image_path === 'string' ? data.image_path : undefined,
+        image_paths: Array.isArray(data.image_paths) ? data.image_paths.filter((item: unknown) => typeof item === 'string') : [],
+      };
+      setSelectedTask((prev) => prev && prev.id === taskId ? applyGallery(prev, result, updatedAt) : prev);
+      setTasks((prev) => prev.map((task) => task.id === taskId ? applyGallery(task, result, updatedAt) : task));
+    } finally {
+      setDetailImageBusy(false);
     }
   };
   const updateStatus = async (id: string, status: string) => {
@@ -620,8 +698,23 @@ export default function DashboardPage() {
   const dlStatus = (d: string | null): string | null => { if (!d) return null; const now = Date.now(), dl = new Date(d).getTime(), today = new Date().setHours(0,0,0,0); if (dl < today) return 'overdue'; if (dl < today + 86400000) return 'today'; if (dl < today + 2*86400000) return 'tomorrow'; return null; };
   const dlClass = (d: string | null) => ({ overdue: 'text-red-400', today: 'text-amber-300', tomorrow: 'text-amber-400/70' } as Record<string,string>)[dlStatus(d) || ''] || 'text-zinc-500';
 
-  const pendingCount = tasks.filter(t => (t.questions?.length || 0) > (t.answered_questions?.length || 0)).length;
+  const pendingTasks = tasks.filter(needsConfirmation);
+  const pendingCount = pendingTasks.length;
+  const boardTasks = needsConfirmationOnly ? pendingTasks : tasks;
   const waitingCount = tasks.filter(t => t.status === 'waiting').length;
+  const showNeedsConfirmation = () => {
+    const action = confirmationAction(tasks);
+    if (action.kind === 'open') {
+      setNeedsConfirmationOnly(false);
+      void loadTaskDetail(action.id);
+      return;
+    }
+    if (action.kind === 'filter') {
+      setNeedsConfirmationOnly(true);
+      setSelectedTask(null);
+      setMobileDetail(false);
+    }
+  };
   const scopeEmptyMessage = emptyTaskScopeMessage(taskScope ?? (user?.role === 'boss' ? 'assigned' : 'created'));
 
   if (loading) return <div className="bg-[var(--bg)] min-h-screen flex items-center justify-center"><p className="text-sm text-zinc-600 animate-pulse">Loading…</p></div>;
@@ -630,12 +723,20 @@ export default function DashboardPage() {
 
   const renderKanbanCard = (task: Task) => {
     const ds = dlStatus(task.deadline);
-    const hasPendingQ = (task.questions?.length || 0) > (task.answered_questions?.length || 0);
+    const pendingQCount = unansweredCount(task);
+    const shots = taskImageSources(task);
     return (
       <div key={task.id} onClick={() => loadTaskDetail(task.id)}
         className={`group card p-3 cursor-pointer transition-all hover:border-zinc-600 hover:bg-[var(--surface-raised)] active:scale-[0.98] ${selectedTask?.id === task.id ? 'ring-1 ring-violet-500/50 border-violet-500/40' : ''}`}>
-        {task.image_path && (
-          <img src={taskImageSrc(task)} alt="Screenshot" className="w-full h-36 object-contain rounded-md mb-2 bg-zinc-950 border border-zinc-800" />
+        {shots.length > 0 && (
+          <div className="relative mb-2">
+            <img src={shots[0]} alt="Screenshot" className="w-full h-36 object-contain rounded-md bg-zinc-950 border border-zinc-800" />
+            {shots.length > 1 && (
+              <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded-md bg-black/75 text-[10px] font-medium text-zinc-100">
+                {shots.length} photos
+              </span>
+            )}
+          </div>
         )}
         <div className="flex items-start gap-2">
           <PriorityDot level={task.priority} />
@@ -651,7 +752,7 @@ export default function DashboardPage() {
                 </span>
               )}
               {task.reply_count > 0 && <span className="text-[10px] text-zinc-600">{task.reply_count} 💬</span>}
-              {hasPendingQ && <span className="text-[10px] text-amber-500 font-medium">{task.questions.length - (task.answered_questions?.length || 0)} ⚡</span>}
+              {pendingQCount > 0 && <span className="text-[10px] text-amber-500 font-medium">{pendingQCount} ⚡</span>}
               {task.ai_error && <AlertIcon />}
             </div>
             <div className="mt-2">
@@ -699,11 +800,12 @@ export default function DashboardPage() {
       </div>
 
       <TaskScreenshot
-        src={t.image_path ? taskImageSrc(t) : ''}
+        shots={taskImageSlots(t)}
         busy={detailImageBusy}
         progress={detailImageProgress}
         error={detailImageError}
-        onFile={(file) => { void replaceTaskImage(t.id, file); }}
+        onFiles={(files) => { void addTaskImages(t.id, files); }}
+        onRemove={(index) => { void removeTaskImage(t.id, index); }}
       />
 
       <div className="flex items-center gap-2 mb-5">
@@ -864,7 +966,7 @@ export default function DashboardPage() {
       >
         {(pendingCount > 0 || waitingCount > 0) && (
           <div className="flex items-center gap-1.5 ml-2 sm:ml-4">
-            {pendingCount > 0 && <span className="px-2 py-0.5 bg-[var(--warning-soft)] text-amber-400 text-[10px] font-medium rounded-full">{pendingCount} question{pendingCount > 1 ? 's' : ''}</span>}
+            {pendingCount > 0 && <button type="button" onClick={showNeedsConfirmation} aria-pressed={needsConfirmationOnly} aria-label="Show tasks that need confirmation" className="min-h-8 px-2.5 bg-[var(--warning-soft)] text-amber-400 text-[10px] font-medium rounded-full hover:bg-amber-900/40">{pendingCount} question{pendingCount > 1 ? 's' : ''}</button>}
             {waitingCount > 0 && <span className="px-2 py-0.5 bg-red-950/50 text-red-400 text-[10px] font-medium rounded-full">{waitingCount} stuck</span>}
           </div>
         )}
@@ -899,6 +1001,11 @@ export default function DashboardPage() {
           ))}
         </div>
         <div className="min-h-11 flex items-center gap-2 px-4 pb-2 flex-wrap">
+        {needsConfirmationOnly && (
+          <button type="button" onClick={() => setNeedsConfirmationOnly(false)} className="inline-flex items-center gap-1.5 min-h-11 px-2.5 rounded-md text-[12px] font-medium bg-amber-950/50 text-amber-300 border border-amber-800/40">
+            Needs confirmation <span aria-hidden="true">×</span>
+          </button>
+        )}
         {isBoss && taskScope === 'all' && (
           <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} className="input-field px-2.5 py-1 text-[12px] w-auto cursor-pointer">
             <option value="">Everyone</option>
@@ -935,7 +1042,7 @@ export default function DashboardPage() {
         <div className="hidden sm:flex flex-col border-r border-[var(--border)] bg-[var(--bg)] overflow-hidden" style={{ width: selectedTask ? '55%' : '100%' }}>
           <div className="flex-1 flex gap-3 p-4 overflow-x-auto overflow-y-hidden">
             {TASK_STATUSES.map(({ value: status, label: colLabel }) => {
-              const colTasks = tasks.filter(t => t.status === status);
+              const colTasks = boardTasks.filter(t => t.status === status);
               const colHeaderBg = status === 'todo' ? 'bg-zinc-950/20' : status === 'in_progress' ? 'bg-blue-950/20' : status === 'waiting' ? 'bg-red-950/20' : 'bg-emerald-950/20';
               const colDot = status === 'todo' ? 'bg-zinc-500' : status === 'in_progress' ? 'bg-blue-500' : status === 'waiting' ? 'bg-red-500' : 'bg-emerald-500';
               return (
@@ -957,7 +1064,7 @@ export default function DashboardPage() {
             })}
           </div>
           <div className="h-9 flex items-center gap-4 px-4 border-t border-[var(--border)] bg-[var(--surface)] flex-shrink-0 text-[10px] text-zinc-600">
-            <span>{tasks.length} total</span>
+            <span>{boardTasks.length} total</span>
             {pendingCount > 0 && <span className="text-amber-500">{pendingCount} need confirmation</span>}
             {waitingCount > 0 && <span className="text-red-400">{waitingCount} stuck</span>}
           </div>
@@ -966,9 +1073,9 @@ export default function DashboardPage() {
         {/* ── Mobile: tabbed Kanban ── */}
         <div className="sm:hidden flex flex-col flex-1 overflow-hidden">
           {/* Status tabs */}
-          <div className="flex gap-1 p-2 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0">
+          {!needsConfirmationOnly && <div className="flex gap-1 p-2 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0">
             {TASK_STATUSES.map(({ value: s, shortLabel: label }) => {
-              const count = tasks.filter(t => t.status === s).length;
+              const count = boardTasks.filter(t => t.status === s).length;
               return (
                 <button key={s} onClick={() => setKanbanTab(s)}
                   className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all text-center ${kanbanTab === s ? 'bg-zinc-800 text-zinc-200 shadow-sm' : 'text-zinc-500'}`}>
@@ -976,18 +1083,20 @@ export default function DashboardPage() {
                 </button>
               );
             })}
-          </div>
-          {/* Active tab cards */}
+          </div>}
+          {/* Active tab cards. The confirmation filter spans every status so a task is not stuck on another tab. */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {tasks.length === 0 ? (
               <div className="flex items-center justify-center py-16 px-6 text-center text-[13px] text-zinc-500">{scopeEmptyMessage}</div>
-            ) : tasks.filter(t => t.status === kanbanTab).length === 0 ? (
+            ) : boardTasks.length === 0 ? (
+              <div className="flex items-center justify-center py-16 text-[12px] text-zinc-600 italic">No tasks need confirmation</div>
+            ) : (needsConfirmationOnly ? boardTasks : boardTasks.filter(t => t.status === kanbanTab)).length === 0 ? (
               <div className="flex items-center justify-center py-16 text-[12px] text-zinc-600 italic">No tasks here</div>
-            ) : tasks.filter(t => t.status === kanbanTab).map(task => renderKanbanCard(task))}
+            ) : (needsConfirmationOnly ? boardTasks : boardTasks.filter(t => t.status === kanbanTab)).map(task => renderKanbanCard(task))}
           </div>
           {/* Bottom stat bar */}
           <div className="h-8 flex items-center gap-3 px-3 border-t border-[var(--border)] bg-[var(--surface)] flex-shrink-0 text-[10px] text-zinc-600">
-            <span>{tasks.length} total</span>
+            <span>{boardTasks.length} total</span>
             {pendingCount > 0 && <span className="text-amber-500">{pendingCount} ⚡</span>}
           </div>
         </div>
@@ -1054,7 +1163,7 @@ export default function DashboardPage() {
                   <AssigneeSelect users={users} value={assigneeId} onChange={setAssigneeId} includeAuto autoLabel="Auto from voice" disabled={processing} />
                   <p className="text-[11px] text-zinc-600 mt-1.5 leading-relaxed">Optional. If the voice note does not name anyone, we will ask who it is for. Boss accounts are listed under Boss.</p>
                 </div>
-                <TaskImageField previewUrl={imagePreview} error={imageError} progress={imageProgress} disabled={processing} onFile={(file) => { void onPickImage(file); }} onClear={clearImageDraft} />
+                <TaskImageField previews={imagePreviews} error={imageError} progress={imageProgress} disabled={processing} onFiles={(files) => { void onPickImages(files); }} onRemove={removeDraftImage} />
                 {!audioBlob ? (
                   <button disabled={processing} onClick={recording ? stopRecording : startRecording} className={`w-full py-2.5 rounded-lg text-[13px] font-medium transition-all duration-200 disabled:opacity-40 ${recording ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-[0_2px_8px_rgb(99_102_241/0.3)]'}`}>
                     {recording ? 'Stop Recording' : 'Start Recording'}
@@ -1086,7 +1195,7 @@ export default function DashboardPage() {
                   <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Assign to</label>
                   <AssigneeSelect users={users} value={assigneeId} onChange={setAssigneeId} disabled={processing} />
                 </div>
-                <TaskImageField previewUrl={imagePreview} error={imageError} progress={imageProgress} disabled={processing} onFile={(file) => { void onPickImage(file); }} onClear={clearImageDraft} />
+                <TaskImageField previews={imagePreviews} error={imageError} progress={imageProgress} disabled={processing} onFiles={(files) => { void onPickImages(files); }} onRemove={removeDraftImage} />
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Priority</label>
@@ -1096,10 +1205,7 @@ export default function DashboardPage() {
                       <option value="high">High</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Deadline</label>
-                    <input type="date" value={typedDeadline} onChange={e => setTypedDeadline(e.target.value)} className="input-field px-2.5 py-2 text-[13px] w-full" />
-                  </div>
+                  <DeadlineField value={typedDeadline} onChange={setTypedDeadline} disabled={processing} />
                 </div>
                 <button type="button" onClick={createTypedTask} disabled={!typedText.trim() || !assigneeId || processing}
                   className="w-full inline-flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">

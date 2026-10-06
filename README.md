@@ -58,6 +58,8 @@ Priority: {priority}
 
 The assignee is **@mentioned** so they get a Lark notification in AgenticOS Group. Official `im/v1/messages` text syntax is `<at user_id="ou_xxx">Name</at>` (`user_id` = open_id, union_id, or user_id — not the BossNote display name). If mention lookup fails, the message still posts with a plain `Assignee: Name` line. Create/reassign never waits on Lark.
 
+The same event also sends a **personal Lark DM** to the assignee (`POST /im/v1/messages?receive_id_type=open_id`) when their open_id resolves. The DM is a short English reminder (new task or reassigned, title, from, priority, and the task link when `BOSSNOTE_URL` is set). It does not @mention anyone else, and it does not message the creator separately — only the assignee, including when they assigned the task to themselves. If the DM is rejected or the open_id is missing, BossNote logs `[lark] dm failed` (or skips silently when there is no id) and the group post still stands. Create/reassign is not blocked.
+
 Reassign uses `Task reassigned:` as the heading. `From` is the person who created the task or performed the reassignment (the signed-in user).
 
 Required on the server (already on Oracle prod `.env` — do **not** commit secrets):
@@ -73,8 +75,10 @@ Optional:
 ```
 LARK_API_BASE=https://open.larksuite.com/open-apis
 BOSSNOTE_URL=https://your-bossnote-host
-LARK_OPEN_IDS=Bayu:ou_xxx,Ian:ou_yyy
+LARK_OPEN_IDS=Boss:ou_boss,Ian:ou_ian,Bayu:ou_bayu
 ```
+
+`ou_boss` / `ou_ian` / `ou_bayu` above are placeholders. Put the real open_ids in the server env, not in git. Map every name the team actually uses: **Boss** (if a Lark or BossNote profile is named Boss), **Ian**, and **Bayu**. The same open_id can be listed under more than one key (`Ian:ou_same,boss-001:ou_same`) when the display name and the BossNote user id differ.
 
 **Assignee → Lark id** (first match wins; never blocks task create):
 
@@ -84,7 +88,7 @@ LARK_OPEN_IDS=Bayu:ou_xxx,Ian:ou_yyy
 
 How to get an `ou_…` open_id: Lark Admin / Open Platform (user open_id for this app), or inspect a message the person sent in the group. Lookup matches the BossNote name to the Lark display name, including a unique first name (`Bayu` ↔ `Bayu Darmawan`). Two people sharing that first name are not guessed. Names on the team: Bayu, Ian, Prista, Sandra.
 
-If any required Lark var is missing, create/reassign still succeeds; Lark is skipped (one warning log). The custom app bot must be in the group and allowed to send messages.
+If any required Lark var is missing, create/reassign still succeeds; Lark is skipped (one warning log). The custom app bot must be in the group and allowed to send messages (`im:message` or `im:message:send_as_bot`, and the group-send scope if the app uses granular permissions). Personal DMs also need permission to message a user, typically `im:message.p2p_msg:send_as_bot`, and the assignee must be in the app’s availability. A DM can still fail if that person has never opened a chat with the bot; BossNote logs it and continues.
 
 ## Daily digest cron (Oracle, Asia/Jakarta)
 
@@ -103,20 +107,36 @@ Any logged-in user (member or boss) can create:
 - **Voice** — same AI pipeline (Gemini 3.7 default + `assignee_hint`). Assignee can be staff or boss. Auto-from-voice still works. A form-selected assignee wins over the AI name hint. If neither resolves, `POST /api/tasks` returns `400` with `code: assignee_required` and the dashboard asks **Who is this task for?** then retries the same recording with `assignee_id`.
 - **Type** — typed title/reminder, no LLM. Works when Gemini is down. `POST /api/tasks` with `text` / `title` (+ `assignee_id`, optional `priority`, `deadline`). JSON body is also accepted.
 
-On create (and reassign), the assignee gets a fire-and-forget push to **every** stored device: title `New task`, body = English task title, tap opens that task. The same events also post an English text message to the Lark group when Lark env is set (see **Lark group notify** above).
+On create (and reassign), the assignee gets a fire-and-forget push to **every** stored device: title `New task`, body = English task title, tap opens that task. The same events also post an English text message to the Lark group and, when the assignee’s open_id resolves, a personal Lark DM (see **Lark group notify** above).
 
 The board has **Assigned to me**, **Created by me**, and **All**. Bosses open on **Assigned to me**. Other users open on **Created by me**. The choice is kept in the `scope` query (`assigned`, `created`, or `all`) and in local storage. **All** is every task that user is allowed to see: bosses see the whole board (and can still narrow it with the assignee picker); members see tasks assigned to them or created by them. The assignee picker lists staff and every Boss account as `Name (Boss)`.
 
 ### Screenshots
 
-Create and edit accept an optional photo (JPEG, PNG, WebP, GIF, or HEIC). It is not required: if the upload fails, the task is still saved and the task screen shows **Add screenshot** / **Replace screenshot** to retry. The photo is on the task card and at the top of the task. Files live in `IMAGE_UPLOAD_DIR` (default `public/uploads/images`; on Oracle use a path outside the repo, same idea as voice notes). Apply `migrations/009_task_image.sql`.
+Create and the task screen accept optional photos (JPEG, PNG, WebP, GIF, or HEIC), up to **8** per task. Pick several at once. A photo is not required: if one upload fails, the task is still saved, the photos that succeeded stay attached, and the task screen shows **Add screenshot** to retry.
+
+List cards show the first photo and a count when there are more. The task screen shows the full gallery.
+
+**Size.** The browser keeps screenshots at or under **3.5MB** as-is so text stays sharp. Larger photos and HEIC are compressed before upload: longest side **2000px**, JPEG quality **0.85**. Originals over **8MB** also try **1600px / 0.72** and **1280px / 0.60** until the file fits. The server stores at most **8MB** per file and rejects anything that is still bigger. Files live in `IMAGE_UPLOAD_DIR` (default `public/uploads/images`; on Oracle use a path outside the repo, same idea as voice notes): `{taskId}-0.jpg`, `{taskId}-1.png`, and so on. Older single files named `{taskId}.jpg` still open.
+
+Apply `migrations/009_task_image.sql` and `migrations/010_task_images.sql`. `image_path` remains the first photo. `image_paths` is the full gallery.
+
+## Done-task retention (6 months)
+
+`scripts/cleanup-old-tasks.mjs` deletes tasks with `status = 'done'` whose `updated_at` is older than **6 months** (index `idx_tasks_done_updated` in `migrations/006_add_users.sql`). It also deletes their voice files and **every** screenshot for those tasks (`{taskId}.ext` and `{taskId}-{n}.ext`) from `IMAGE_UPLOAD_DIR`. Replies cascade with the task. Deleting a task in the app removes its image files the same way.
+
+Run it from the app directory with the server env loaded (same pattern as the daily digest):
+
+```
+cd /home/ubuntu/apps/bossnote && set -a && . ./.env && set +a && node scripts/cleanup-old-tasks.mjs
+```
 
 ## Deploy notes
 
 1. `npm i`
-2. Apply `migrations/007_push_subscriptions.sql`, `migrations/008_lark_open_id.sql`, and `migrations/009_task_image.sql`
+2. Apply `migrations/007_push_subscriptions.sql`, `migrations/008_lark_open_id.sql`, `migrations/009_task_image.sql`, and `migrations/010_task_images.sql`
 3. Optional: `IMAGE_UPLOAD_DIR=/home/ubuntu/data/bossnote-images` (create the directory; do not commit photos)
-4. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`, `LARK_OPEN_IDS`)
+4. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify and assignee DMs, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`, `LARK_OPEN_IDS` with Boss, Ian, and Bayu). Enable bot scopes for group send and user DM (`im:message.p2p_msg:send_as_bot`).
 5. Install the crontab line above
 6. Rebuild / restart (`npm run build && npm start` or your Oracle process manager)
 7. Installed PWAs pick up `bossnote-v8` after the next visit
