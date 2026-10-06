@@ -105,7 +105,7 @@ Any logged-in user (member or boss) can create:
 
 On create (and reassign), the assignee gets a fire-and-forget push to **every** stored device: title `New task`, body = English task title, tap opens that task. The same events also post an English text message to the Lark group when Lark env is set (see **Lark group notify** above).
 
-Members still only see tasks assigned to them. Bosses open on **Assigned to me** (one tap back to Everyone). The assignee picker lists staff and every Boss account as `Name (Boss)`.
+The board has **Assigned to me**, **Created by me**, and **All**. Bosses open on **Assigned to me**. Other users open on **Created by me**. The choice is kept in the `scope` query (`assigned`, `created`, or `all`) and in local storage. **All** is every task that user is allowed to see: bosses see the whole board (and can still narrow it with the assignee picker); members see tasks assigned to them or created by them. The assignee picker lists staff and every Boss account as `Name (Boss)`.
 
 ### Screenshots
 

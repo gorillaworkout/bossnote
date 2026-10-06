@@ -18,6 +18,7 @@ import {
 import { sendPushToUser } from '@/lib/push';
 import { notifyLarkTask } from '@/lib/lark';
 import { assignmentPushUrl } from '@/lib/task-access';
+import { buildTaskListQuery } from '@/lib/task-list-scope';
 import { saveVoice, voiceExt } from '@/lib/voice-storage';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -26,49 +27,13 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { searchParams } = new URL(request.url);
-  const filterAssignee = searchParams.get('assignee');
-  const filterStatus = searchParams.get('status');
-
-  const filterSearch = searchParams.get('search');
-
-  let sql = `
-    SELECT t.*,
-      bu.name as boss_name,
-      au.name as assignee_name,
-      (SELECT COUNT(*) FROM task_replies WHERE task_id = t.id) as reply_count
-    FROM tasks t
-    JOIN users bu ON t.created_by = bu.id
-    JOIN users au ON t.assignee_id = au.id
-  `;
-  const conditions: string[] = [];
-  const values: string[] = [];
-
-  if (user.role === 'member') {
-    conditions.push('t.assignee_id = ?');
-    values.push(user.id);
-  }
-
-  if (filterAssignee && user.role === 'boss') {
-    conditions.push('t.assignee_id = ?');
-    values.push(filterAssignee);
-  }
-
-  if (filterStatus) {
-    conditions.push('t.status = ?');
-    values.push(filterStatus);
-  }
-
-  if (filterSearch) {
-    conditions.push('(LOWER(t.title) LIKE ? OR LOWER(t.title_id) LIKE ?)');
-    const s = `%${filterSearch.toLowerCase()}%`;
-    values.push(s, s);
-  }
-
-  if (conditions.length > 0) {
-    sql += ' WHERE ' + conditions.join(' AND ');
-  }
-
-  sql += ' ORDER BY t.created_at DESC LIMIT 100';
+  const { sql, values } = buildTaskListQuery({
+    user,
+    scope: searchParams.get('scope'),
+    assignee: searchParams.get('assignee'),
+    status: searchParams.get('status'),
+    search: searchParams.get('search'),
+  });
 
   const tasks = await queryAll(sql, values);
   return NextResponse.json({ tasks });
