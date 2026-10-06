@@ -228,6 +228,25 @@ export function buildTaskNotifyText(input: LarkTaskNotifyInput): string {
   return lines.join('\n');
 }
 
+/** Personal reminder. No @mention — the message is already a DM to the assignee. */
+export function buildAssigneeDmText(input: LarkTaskNotifyInput): string {
+  const title = (input.title || '').trim() || 'Untitled task';
+  const from = (input.creatorName || '').trim() || 'Unknown';
+  const priority = (input.priority || 'medium').trim() || 'medium';
+  const heading = input.kind === 'reassign' ? 'Task reassigned to you' : 'New task for you';
+  const lines = [
+    `${heading}: ${title}`,
+    `From: ${from}`,
+    `Priority: ${priority}`,
+  ];
+  const url = publicBossnoteUrl().replace(/\/+$/, '');
+  if (url) {
+    const taskId = (input.taskId || '').trim();
+    lines.push(taskId ? `${url}/dashboard?task=${encodeURIComponent(taskId)}` : url);
+  }
+  return lines.join('\n');
+}
+
 type TokenResponse = {
   code?: number;
   msg?: string;
@@ -396,56 +415,83 @@ export async function resolveAssigneeOpenId(input: {
 }
 
 /**
- * POST /im/v1/messages?receive_id_type=chat_id
- * No-ops (log once) when Lark env is missing. Never throws.
+ * POST /im/v1/messages. Group uses receive_id_type=chat_id; a personal
+ * reminder uses receive_id_type=open_id. Never throws.
  */
-export async function sendGroupText(text: string): Promise<boolean> {
+async function sendImText(
+  receiveIdType: 'chat_id' | 'open_id',
+  receiveId: string,
+  text: string,
+  failLabel: string,
+): Promise<boolean> {
   try {
     const config = readConfig();
     if (!config) return false;
 
     const trimmed = (text || '').trim();
-    if (!trimmed) return false;
+    const id = receiveId.trim();
+    if (!trimmed || !id) return false;
 
     const token = await getTenantToken();
     if (!token) return false;
 
-    const res = await fetch(`${config.apiBase}/im/v1/messages?receive_id_type=chat_id`, {
+    const res = await fetch(`${config.apiBase}/im/v1/messages?receive_id_type=${receiveIdType}`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json; charset=utf-8',
       },
       body: JSON.stringify({
-        receive_id: config.chatId,
+        receive_id: id,
         msg_type: 'text',
         content: JSON.stringify({ text: trimmed }),
       }),
     });
     const data = (await res.json().catch(() => ({}))) as MessageResponse;
     if (!res.ok || (typeof data.code === 'number' && data.code !== 0)) {
-      console.error('[lark] send failed', data.code ?? res.status, data.msg ?? res.statusText);
+      console.error(`[lark] ${failLabel}`, data.code ?? res.status, data.msg ?? res.statusText);
       return false;
     }
     return true;
   } catch (err) {
-    console.error('[lark] send failed', err);
+    console.error(`[lark] ${failLabel}`, err);
     return false;
   }
 }
 
-/** Awaitable notify used by tests. Still never throws. */
+/**
+ * POST /im/v1/messages?receive_id_type=chat_id
+ * No-ops (log once) when Lark env is missing. Never throws.
+ */
+export async function sendGroupText(text: string): Promise<boolean> {
+  const config = readConfig();
+  if (!config) return false;
+  return sendImText('chat_id', config.chatId, text, 'send failed');
+}
+
+/** Personal IM to a Lark open_id. No-ops when the id is missing or invalid. */
+export async function sendUserText(openId: string, text: string): Promise<boolean> {
+  const id = normalizeLarkOpenId(openId);
+  if (!id) return false;
+  return sendImText('open_id', id, text, 'dm failed');
+}
+
+/** Awaitable notify used by tests. Still never throws. Group result is the return value; a failed DM is logged and ignored. */
 export async function notifyLarkTaskAsync(input: LarkTaskNotifyInput): Promise<boolean> {
   try {
     const assigneeOpenId = await resolveAssigneeOpenId(input);
-    return await sendGroupText(buildTaskNotifyText({ ...input, assigneeOpenId }));
+    const groupOk = await sendGroupText(buildTaskNotifyText({ ...input, assigneeOpenId }));
+    if (assigneeOpenId) {
+      await sendUserText(assigneeOpenId, buildAssigneeDmText(input));
+    }
+    return groupOk;
   } catch (err) {
     console.error('[bossnote] lark notify failed:', err);
     return false;
   }
 }
 
-/** Fire-and-forget group notify. Safe to call after task create / reassign. */
+/** Fire-and-forget group post plus assignee DM. Safe to call after task create / reassign. */
 export function notifyLarkTask(input: LarkTaskNotifyInput): void {
   void notifyLarkTaskAsync(input).catch((err) => {
     console.error('[bossnote] lark notify failed:', err);

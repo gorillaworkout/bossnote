@@ -58,6 +58,8 @@ Priority: {priority}
 
 The assignee is **@mentioned** so they get a Lark notification in AgenticOS Group. Official `im/v1/messages` text syntax is `<at user_id="ou_xxx">Name</at>` (`user_id` = open_id, union_id, or user_id — not the BossNote display name). If mention lookup fails, the message still posts with a plain `Assignee: Name` line. Create/reassign never waits on Lark.
 
+The same event also sends a **personal Lark DM** to the assignee (`POST /im/v1/messages?receive_id_type=open_id`) when their open_id resolves. The DM is a short English reminder (new task or reassigned, title, from, priority, and the task link when `BOSSNOTE_URL` is set). It does not @mention anyone else, and it does not message the creator separately — only the assignee, including when they assigned the task to themselves. If the DM is rejected or the open_id is missing, BossNote logs `[lark] dm failed` (or skips silently when there is no id) and the group post still stands. Create/reassign is not blocked.
+
 Reassign uses `Task reassigned:` as the heading. `From` is the person who created the task or performed the reassignment (the signed-in user).
 
 Required on the server (already on Oracle prod `.env` — do **not** commit secrets):
@@ -73,8 +75,10 @@ Optional:
 ```
 LARK_API_BASE=https://open.larksuite.com/open-apis
 BOSSNOTE_URL=https://your-bossnote-host
-LARK_OPEN_IDS=Bayu:ou_xxx,Ian:ou_yyy
+LARK_OPEN_IDS=Boss:ou_boss,Ian:ou_ian,Bayu:ou_bayu
 ```
+
+`ou_boss` / `ou_ian` / `ou_bayu` above are placeholders. Put the real open_ids in the server env, not in git. Map every name the team actually uses: **Boss** (if a Lark or BossNote profile is named Boss), **Ian**, and **Bayu**. The same open_id can be listed under more than one key (`Ian:ou_same,boss-001:ou_same`) when the display name and the BossNote user id differ.
 
 **Assignee → Lark id** (first match wins; never blocks task create):
 
@@ -84,7 +88,7 @@ LARK_OPEN_IDS=Bayu:ou_xxx,Ian:ou_yyy
 
 How to get an `ou_…` open_id: Lark Admin / Open Platform (user open_id for this app), or inspect a message the person sent in the group. Lookup matches the BossNote name to the Lark display name, including a unique first name (`Bayu` ↔ `Bayu Darmawan`). Two people sharing that first name are not guessed. Names on the team: Bayu, Ian, Prista, Sandra.
 
-If any required Lark var is missing, create/reassign still succeeds; Lark is skipped (one warning log). The custom app bot must be in the group and allowed to send messages.
+If any required Lark var is missing, create/reassign still succeeds; Lark is skipped (one warning log). The custom app bot must be in the group and allowed to send messages (`im:message` or `im:message:send_as_bot`, and the group-send scope if the app uses granular permissions). Personal DMs also need permission to message a user, typically `im:message.p2p_msg:send_as_bot`, and the assignee must be in the app’s availability. A DM can still fail if that person has never opened a chat with the bot; BossNote logs it and continues.
 
 ## Daily digest cron (Oracle, Asia/Jakarta)
 
@@ -103,7 +107,7 @@ Any logged-in user (member or boss) can create:
 - **Voice** — same AI pipeline (Gemini 3.7 default + `assignee_hint`). Assignee can be staff or boss. Auto-from-voice still works. A form-selected assignee wins over the AI name hint. If neither resolves, `POST /api/tasks` returns `400` with `code: assignee_required` and the dashboard asks **Who is this task for?** then retries the same recording with `assignee_id`.
 - **Type** — typed title/reminder, no LLM. Works when Gemini is down. `POST /api/tasks` with `text` / `title` (+ `assignee_id`, optional `priority`, `deadline`). JSON body is also accepted.
 
-On create (and reassign), the assignee gets a fire-and-forget push to **every** stored device: title `New task`, body = English task title, tap opens that task. The same events also post an English text message to the Lark group when Lark env is set (see **Lark group notify** above).
+On create (and reassign), the assignee gets a fire-and-forget push to **every** stored device: title `New task`, body = English task title, tap opens that task. The same events also post an English text message to the Lark group and, when the assignee’s open_id resolves, a personal Lark DM (see **Lark group notify** above).
 
 The board has **Assigned to me**, **Created by me**, and **All**. Bosses open on **Assigned to me**. Other users open on **Created by me**. The choice is kept in the `scope` query (`assigned`, `created`, or `all`) and in local storage. **All** is every task that user is allowed to see: bosses see the whole board (and can still narrow it with the assignee picker); members see tasks assigned to them or created by them. The assignee picker lists staff and every Boss account as `Name (Boss)`.
 
@@ -116,7 +120,7 @@ Create and edit accept an optional photo (JPEG, PNG, WebP, GIF, or HEIC). It is 
 1. `npm i`
 2. Apply `migrations/007_push_subscriptions.sql`, `migrations/008_lark_open_id.sql`, and `migrations/009_task_image.sql`
 3. Optional: `IMAGE_UPLOAD_DIR=/home/ubuntu/data/bossnote-images` (create the directory; do not commit photos)
-4. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`, `LARK_OPEN_IDS`)
+4. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify and assignee DMs, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`, `LARK_OPEN_IDS` with Boss, Ian, and Bayu). Enable bot scopes for group send and user DM (`im:message.p2p_msg:send_as_bot`).
 5. Install the crontab line above
 6. Rebuild / restart (`npm run build && npm start` or your Oracle process manager)
 7. Installed PWAs pick up `bossnote-v8` after the next visit

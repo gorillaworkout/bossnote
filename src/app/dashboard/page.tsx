@@ -18,6 +18,8 @@ import { taskImageSrc } from '@/lib/task-image';
 import { prepareTaskImage } from '@/lib/prepare-task-image';
 import { hasUsableTaskText, isVoiceUnclearError } from '@/lib/voice-clarity';
 import { uploadTaskImage } from '@/components/upload-task-image';
+import { DeadlineField } from '@/components/DeadlineField';
+import { confirmationAction, needsConfirmation, unansweredCount } from '@/lib/needs-confirmation';
 import { TaskImageField } from '@/components/TaskImageField';
 import { TaskScreenshot } from '@/components/TaskScreenshot';
 
@@ -279,6 +281,7 @@ export default function DashboardPage() {
   const [filterAssignee, setFilterAssignee] = useState('');
   const [taskScope, setTaskScope] = useState<TaskListScope | null>(null);
   const [filterStatus, setFilterStatus] = useState('');
+  const [needsConfirmationOnly, setNeedsConfirmationOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [aiModel, setAiModel] = useState('ag/gemini-3.7-flash-high');
   const [modelOptions, setModelOptions] = useState<string[]>(['ag/gemini-3.7-flash-high']);
@@ -614,8 +617,23 @@ export default function DashboardPage() {
   const dlStatus = (d: string | null): string | null => { if (!d) return null; const now = Date.now(), dl = new Date(d).getTime(), today = new Date().setHours(0,0,0,0); if (dl < today) return 'overdue'; if (dl < today + 86400000) return 'today'; if (dl < today + 2*86400000) return 'tomorrow'; return null; };
   const dlClass = (d: string | null) => ({ overdue: 'text-red-400', today: 'text-amber-300', tomorrow: 'text-amber-400/70' } as Record<string,string>)[dlStatus(d) || ''] || 'text-zinc-500';
 
-  const pendingCount = tasks.filter(t => (t.questions?.length || 0) > (t.answered_questions?.length || 0)).length;
+  const pendingTasks = tasks.filter(needsConfirmation);
+  const pendingCount = pendingTasks.length;
+  const boardTasks = needsConfirmationOnly ? pendingTasks : tasks;
   const waitingCount = tasks.filter(t => t.status === 'waiting').length;
+  const showNeedsConfirmation = () => {
+    const action = confirmationAction(tasks);
+    if (action.kind === 'open') {
+      setNeedsConfirmationOnly(false);
+      void loadTaskDetail(action.id);
+      return;
+    }
+    if (action.kind === 'filter') {
+      setNeedsConfirmationOnly(true);
+      setSelectedTask(null);
+      setMobileDetail(false);
+    }
+  };
   const scopeEmptyMessage = emptyTaskScopeMessage(taskScope ?? (user?.role === 'boss' ? 'assigned' : 'created'));
 
   if (loading) return <div className="bg-[var(--bg)] min-h-screen flex items-center justify-center"><p className="text-sm text-zinc-600 animate-pulse">Loading…</p></div>;
@@ -624,7 +642,7 @@ export default function DashboardPage() {
 
   const renderKanbanCard = (task: Task) => {
     const ds = dlStatus(task.deadline);
-    const hasPendingQ = (task.questions?.length || 0) > (task.answered_questions?.length || 0);
+    const pendingQCount = unansweredCount(task);
     return (
       <div key={task.id} onClick={() => loadTaskDetail(task.id)}
         className={`group card p-3 cursor-pointer transition-all hover:border-zinc-600 hover:bg-[var(--surface-raised)] active:scale-[0.98] ${selectedTask?.id === task.id ? 'ring-1 ring-violet-500/50 border-violet-500/40' : ''}`}>
@@ -645,7 +663,7 @@ export default function DashboardPage() {
                 </span>
               )}
               {task.reply_count > 0 && <span className="text-[10px] text-zinc-600">{task.reply_count} 💬</span>}
-              {hasPendingQ && <span className="text-[10px] text-amber-500 font-medium">{task.questions.length - (task.answered_questions?.length || 0)} ⚡</span>}
+              {pendingQCount > 0 && <span className="text-[10px] text-amber-500 font-medium">{pendingQCount} ⚡</span>}
               {task.ai_error && <AlertIcon />}
             </div>
           </div>
@@ -849,7 +867,7 @@ export default function DashboardPage() {
       >
         {(pendingCount > 0 || waitingCount > 0) && (
           <div className="flex items-center gap-1.5 ml-2 sm:ml-4">
-            {pendingCount > 0 && <span className="px-2 py-0.5 bg-[var(--warning-soft)] text-amber-400 text-[10px] font-medium rounded-full">{pendingCount} question{pendingCount > 1 ? 's' : ''}</span>}
+            {pendingCount > 0 && <button type="button" onClick={showNeedsConfirmation} aria-pressed={needsConfirmationOnly} aria-label="Show tasks that need confirmation" className="min-h-8 px-2.5 bg-[var(--warning-soft)] text-amber-400 text-[10px] font-medium rounded-full hover:bg-amber-900/40">{pendingCount} question{pendingCount > 1 ? 's' : ''}</button>}
             {waitingCount > 0 && <span className="px-2 py-0.5 bg-red-950/50 text-red-400 text-[10px] font-medium rounded-full">{waitingCount} stuck</span>}
           </div>
         )}
@@ -884,6 +902,11 @@ export default function DashboardPage() {
           ))}
         </div>
         <div className="min-h-11 flex items-center gap-2 px-4 pb-2 flex-wrap">
+        {needsConfirmationOnly && (
+          <button type="button" onClick={() => setNeedsConfirmationOnly(false)} className="inline-flex items-center gap-1.5 min-h-11 px-2.5 rounded-md text-[12px] font-medium bg-amber-950/50 text-amber-300 border border-amber-800/40">
+            Needs confirmation <span aria-hidden="true">×</span>
+          </button>
+        )}
         {isBoss && taskScope === 'all' && (
           <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} className="input-field px-2.5 py-1 text-[12px] w-auto cursor-pointer">
             <option value="">Everyone</option>
@@ -920,7 +943,7 @@ export default function DashboardPage() {
         <div className="hidden sm:flex flex-col border-r border-[var(--border)] bg-[var(--bg)] overflow-hidden" style={{ width: selectedTask ? '55%' : '100%' }}>
           <div className="flex-1 flex gap-3 p-4 overflow-x-auto overflow-y-hidden">
             {(['todo', 'in_progress', 'waiting', 'done'] as const).map(status => {
-              const colTasks = tasks.filter(t => t.status === status);
+              const colTasks = boardTasks.filter(t => t.status === status);
               const colLabel = { todo: 'To Do', in_progress: 'In Progress', waiting: 'Stuck', done: 'Done' }[status];
               const colHeaderBg = status === 'todo' ? 'bg-zinc-950/20' : status === 'in_progress' ? 'bg-blue-950/20' : status === 'waiting' ? 'bg-red-950/20' : 'bg-emerald-950/20';
               const colDot = status === 'todo' ? 'bg-zinc-500' : status === 'in_progress' ? 'bg-blue-500' : status === 'waiting' ? 'bg-red-500' : 'bg-emerald-500';
@@ -943,7 +966,7 @@ export default function DashboardPage() {
             })}
           </div>
           <div className="h-9 flex items-center gap-4 px-4 border-t border-[var(--border)] bg-[var(--surface)] flex-shrink-0 text-[10px] text-zinc-600">
-            <span>{tasks.length} total</span>
+            <span>{boardTasks.length} total</span>
             {pendingCount > 0 && <span className="text-amber-500">{pendingCount} need confirmation</span>}
             {waitingCount > 0 && <span className="text-red-400">{waitingCount} stuck</span>}
           </div>
@@ -952,9 +975,9 @@ export default function DashboardPage() {
         {/* ── Mobile: tabbed Kanban ── */}
         <div className="sm:hidden flex flex-col flex-1 overflow-hidden">
           {/* Status tabs */}
-          <div className="flex gap-1 p-2 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0">
+          {!needsConfirmationOnly && <div className="flex gap-1 p-2 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0">
             {(['todo', 'in_progress', 'waiting', 'done'] as const).map(s => {
-              const count = tasks.filter(t => t.status === s).length;
+              const count = boardTasks.filter(t => t.status === s).length;
               const label = { todo: 'To Do', in_progress: 'Progress', waiting: 'Stuck', done: 'Done' }[s];
               return (
                 <button key={s} onClick={() => setKanbanTab(s)}
@@ -963,18 +986,20 @@ export default function DashboardPage() {
                 </button>
               );
             })}
-          </div>
-          {/* Active tab cards */}
+          </div>}
+          {/* Active tab cards. The confirmation filter spans every status so a task is not stuck on another tab. */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {tasks.length === 0 ? (
               <div className="flex items-center justify-center py-16 px-6 text-center text-[13px] text-zinc-500">{scopeEmptyMessage}</div>
-            ) : tasks.filter(t => t.status === kanbanTab).length === 0 ? (
+            ) : boardTasks.length === 0 ? (
+              <div className="flex items-center justify-center py-16 text-[12px] text-zinc-600 italic">No tasks need confirmation</div>
+            ) : (needsConfirmationOnly ? boardTasks : boardTasks.filter(t => t.status === kanbanTab)).length === 0 ? (
               <div className="flex items-center justify-center py-16 text-[12px] text-zinc-600 italic">No tasks here</div>
-            ) : tasks.filter(t => t.status === kanbanTab).map(task => renderKanbanCard(task))}
+            ) : (needsConfirmationOnly ? boardTasks : boardTasks.filter(t => t.status === kanbanTab)).map(task => renderKanbanCard(task))}
           </div>
           {/* Bottom stat bar */}
           <div className="h-8 flex items-center gap-3 px-3 border-t border-[var(--border)] bg-[var(--surface)] flex-shrink-0 text-[10px] text-zinc-600">
-            <span>{tasks.length} total</span>
+            <span>{boardTasks.length} total</span>
             {pendingCount > 0 && <span className="text-amber-500">{pendingCount} ⚡</span>}
           </div>
         </div>
@@ -1083,10 +1108,7 @@ export default function DashboardPage() {
                       <option value="high">High</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Deadline</label>
-                    <input type="date" value={typedDeadline} onChange={e => setTypedDeadline(e.target.value)} className="input-field px-2.5 py-2 text-[13px] w-full" />
-                  </div>
+                  <DeadlineField value={typedDeadline} onChange={setTypedDeadline} disabled={processing} />
                 </div>
                 <button type="button" onClick={createTypedTask} disabled={!typedText.trim() || !assigneeId || processing}
                   className="w-full inline-flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">
