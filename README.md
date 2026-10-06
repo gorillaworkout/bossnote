@@ -109,12 +109,28 @@ The board has **Assigned to me**, **Created by me**, and **All**. Bosses open on
 
 ### Screenshots
 
-Create and edit accept an optional photo (JPEG, PNG, WebP, GIF, or HEIC). It is not required: if the upload fails, the task is still saved and the task screen shows **Add screenshot** / **Replace screenshot** to retry. The photo is on the task card and at the top of the task. Files live in `IMAGE_UPLOAD_DIR` (default `public/uploads/images`; on Oracle use a path outside the repo, same idea as voice notes). Apply `migrations/009_task_image.sql`.
+Create and the task screen accept optional photos (JPEG, PNG, WebP, GIF, or HEIC), up to **8** per task. Pick several at once. A photo is not required: if one upload fails, the task is still saved, the photos that succeeded stay attached, and the task screen shows **Add screenshot** to retry.
+
+List cards show the first photo and a count when there are more. The task screen shows the full gallery.
+
+**Size.** The browser keeps screenshots at or under **3.5MB** as-is so text stays sharp. Larger photos and HEIC are compressed before upload: longest side **2000px**, JPEG quality **0.85**. Originals over **8MB** also try **1600px / 0.72** and **1280px / 0.60** until the file fits. The server stores at most **8MB** per file and rejects anything that is still bigger. Files live in `IMAGE_UPLOAD_DIR` (default `public/uploads/images`; on Oracle use a path outside the repo, same idea as voice notes): `{taskId}-0.jpg`, `{taskId}-1.png`, and so on. Older single files named `{taskId}.jpg` still open.
+
+Apply `migrations/009_task_image.sql` and `migrations/010_task_images.sql`. `image_path` remains the first photo. `image_paths` is the full gallery.
+
+## Done-task retention (6 months)
+
+`scripts/cleanup-old-tasks.mjs` deletes tasks with `status = 'done'` whose `updated_at` is older than **6 months** (index `idx_tasks_done_updated` in `migrations/006_add_users.sql`). It also deletes their voice files and **every** screenshot for those tasks (`{taskId}.ext` and `{taskId}-{n}.ext`) from `IMAGE_UPLOAD_DIR`. Replies cascade with the task. Deleting a task in the app removes its image files the same way.
+
+Run it from the app directory with the server env loaded (same pattern as the daily digest):
+
+```
+cd /home/ubuntu/apps/bossnote && set -a && . ./.env && set +a && node scripts/cleanup-old-tasks.mjs
+```
 
 ## Deploy notes
 
 1. `npm i`
-2. Apply `migrations/007_push_subscriptions.sql`, `migrations/008_lark_open_id.sql`, and `migrations/009_task_image.sql`
+2. Apply `migrations/007_push_subscriptions.sql`, `migrations/008_lark_open_id.sql`, `migrations/009_task_image.sql`, and `migrations/010_task_images.sql`
 3. Optional: `IMAGE_UPLOAD_DIR=/home/ubuntu/data/bossnote-images` (create the directory; do not commit photos)
 4. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`, `LARK_OPEN_IDS`)
 5. Install the crontab line above

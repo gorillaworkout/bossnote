@@ -1,54 +1,63 @@
 'use client';
 
 export function TaskImageField({
-  previewUrl,
+  previews,
   error,
   progress,
   disabled,
-  onFile,
-  onClear,
+  onFiles,
+  onRemove,
 }: {
-  previewUrl: string | null;
+  previews: string[];
   error: string | null;
   progress: number | null;
   disabled?: boolean;
-  onFile: (file: File | null) => void;
-  onClear: () => void;
+  onFiles: (files: File[]) => void;
+  onRemove: (index: number) => void;
 }) {
   return (
     <div className="text-left mb-3">
       <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Screenshot (optional)</label>
       <p className="text-[11px] text-zinc-600 mb-2 leading-relaxed">
-        Boss sees this photo on the task. If the upload fails, the task is still saved and you can retry.
+        Add one or more photos. Boss sees them on the task. If one upload fails, the task is still saved and you can retry.
       </p>
-      {previewUrl ? (
-        <div className="relative">
-          <img src={previewUrl} alt="Screenshot preview" className="w-full max-h-40 object-contain rounded-lg bg-zinc-950 border border-zinc-800" />
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={onClear}
-            className="absolute top-1.5 right-1.5 px-2 py-1 rounded-md bg-black/70 text-[11px] text-zinc-200 disabled:opacity-40"
-          >
-            Remove
-          </button>
+      {previews.length > 0 && (
+        <div className="grid grid-cols-3 gap-2 mb-2">
+          {previews.map((url, index) => (
+            <div key={`${url}-${index}`} className="relative">
+              <img
+                src={url}
+                alt={`Screenshot ${index + 1}`}
+                className="w-full h-20 object-cover rounded-lg bg-zinc-950 border border-zinc-800"
+              />
+              <button
+                type="button"
+                disabled={disabled}
+                aria-label={`Remove screenshot ${index + 1}`}
+                onClick={() => onRemove(index)}
+                className="absolute top-1 right-1 min-w-7 min-h-7 px-1.5 rounded-md bg-black/70 text-[12px] text-zinc-100 disabled:opacity-40"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
-      ) : (
-        <label className={`flex items-center justify-center w-full min-h-16 py-3 px-3 rounded-lg border border-dashed border-zinc-700 text-[13px] text-zinc-300 ${disabled ? 'opacity-40' : 'active:bg-zinc-800'}`}>
-          Add photo
-          <input
-            type="file"
-            accept="image/*"
-            className="sr-only"
-            disabled={disabled}
-            onChange={(e) => {
-              const file = e.target.files?.[0] || null;
-              e.target.value = '';
-              onFile(file);
-            }}
-          />
-        </label>
       )}
+      <label className={`flex items-center justify-center w-full min-h-11 py-3 px-3 rounded-lg border border-dashed border-zinc-700 text-[13px] text-zinc-300 ${disabled ? 'opacity-40' : 'active:bg-zinc-800'}`}>
+        {previews.length ? 'Add more photos' : 'Add photos'}
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          className="sr-only"
+          disabled={disabled}
+          onChange={(e) => {
+            const files = Array.from(e.target.files || []);
+            e.target.value = '';
+            if (files.length) onFiles(files);
+          }}
+        />
+      </label>
       {progress !== null && (
         <div className="mt-2" aria-live="polite">
           <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
