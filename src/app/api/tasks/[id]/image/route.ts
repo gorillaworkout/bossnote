@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth';
 import { appendTaskImage, deleteTaskImageSlot, readTaskImageAt } from '@/lib/image-storage';
 import { canViewTask } from '@/lib/task-access';
 import { loadTaskForImage, saveTaskGallery } from '@/lib/task-gallery';
+import { publishTaskListChange } from '@/lib/task-live';
 import { imageFileResponse } from '@/lib/task-image-response';
 import {
   TASK_IMAGE_MAX_COUNT,
@@ -105,6 +106,7 @@ export async function POST(
     );
   }
 
+  publishTaskListChange();
   return NextResponse.json({
     ok: true,
     image_path: savedPaths[0],

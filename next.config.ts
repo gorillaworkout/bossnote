@@ -7,6 +7,13 @@ const nextConfig: NextConfig = {
         source: '/api/auth/:path*',
         headers: [{ key: 'Cache-Control', value: 'no-store, private' }],
       },
+      {
+        source: '/api/tasks/events',
+        headers: [
+          { key: 'Cache-Control', value: 'no-cache, no-transform' },
+          { key: 'X-Accel-Buffering', value: 'no' },
+        ],
+      },
     ];
   },
 };

@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth';
 import { deleteTaskImageSlot, readTaskImageAt } from '@/lib/image-storage';
 import { canViewTask } from '@/lib/task-access';
 import { loadTaskForImage, saveTaskGallery } from '@/lib/task-gallery';
+import { publishTaskListChange } from '@/lib/task-live';
 import { imageFileResponse } from '@/lib/task-image-response';
 import { TASK_IMAGE_MAX_INDEX, imageIndexFromPublicPath, taskImagePaths } from '@/lib/task-image';
 
@@ -66,6 +67,7 @@ export async function DELETE(
     return NextResponse.json({ error: 'Could not remove that photo.' }, { status: 500 });
   }
 
+  publishTaskListChange();
   return NextResponse.json({
     ok: true,
     image_path: remaining[0] ?? null,

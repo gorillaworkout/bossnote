@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth';
 import { queryOne, execute } from '@/lib/database';
 import { transcribeReply, getUserModel } from '@/lib/ai';
 import { saveVoice, voiceExt } from '@/lib/voice-storage';
+import { publishTaskListChange } from '@/lib/task-live';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function POST(
@@ -93,5 +94,6 @@ export async function POST(
     [replyId],
   );
 
+  publishTaskListChange();
   return NextResponse.json({ reply, ai_error: aiError, ok: true }, { status: 201 });
 }

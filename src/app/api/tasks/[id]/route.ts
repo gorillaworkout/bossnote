@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth';
 import { queryOne, execute } from '@/lib/database';
 import { deleteTaskImage } from '@/lib/image-storage';
 import { assignmentPushUrl, canViewTask } from '@/lib/task-access';
+import { publishTaskListChange } from '@/lib/task-live';
 
 export async function GET(
   _request: NextRequest,
@@ -70,6 +71,7 @@ export async function PUT(
       'UPDATE tasks SET status = ?, updated_at = NOW() WHERE id = ?',
       [status, id],
     );
+    publishTaskListChange();
     return NextResponse.json({ ok: true });
   }
 
@@ -90,6 +92,7 @@ export async function PUT(
       'UPDATE tasks SET assignee_id = ?, updated_at = NOW() WHERE id = ?',
       [nextAssigneeId, id],
     );
+    publishTaskListChange();
 
     if (nextAssigneeId !== task.assignee_id) {
       const { sendPushToUser } = await import('@/lib/push');
@@ -129,6 +132,7 @@ export async function DELETE(
 
   const { id } = await params;
   await execute('DELETE FROM tasks WHERE id = ?', [id]);
+  publishTaskListChange();
   deleteTaskImage(id);
   return NextResponse.json({ ok: true });
 }

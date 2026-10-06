@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { PushEnableBanner } from '@/components/PushEnableBanner';
 import { VoicePlayer } from '@/components/VoicePlayer';
@@ -23,6 +23,8 @@ import { confirmationAction, needsConfirmation, unansweredCount } from '@/lib/ne
 import { TaskImageField } from '@/components/TaskImageField';
 import { TaskScreenshot } from '@/components/TaskScreenshot';
 import { StatusButtons } from '@/components/StatusButtons';
+import { useLiveTaskList } from '@/components/use-live-task-list';
+import { mergeLiveTaskList } from '@/lib/task-list-live';
 import { TASK_STATUSES, type TaskStatus } from '@/lib/task-status';
 
 /* ── Types ── */
@@ -312,15 +314,39 @@ export default function DashboardPage() {
 
   /* ── Data fetching ── */
 
+  const fetchSeq = useRef(0);
+  const statusPendingIdRef = useRef<string | null>(null);
+  const selectedTaskIdRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    statusPendingIdRef.current = statusPendingId;
+    selectedTaskIdRef.current = selectedTask?.id ?? null;
+  }, [statusPendingId, selectedTask]);
+
   const fetchTasks = useCallback(async () => {
     if (!taskScope) return;
+    const seq = ++fetchSeq.current;
     const params = new URLSearchParams();
     params.set('scope', taskScope);
     if (filterAssignee && taskScope === 'all') params.set('assignee', filterAssignee);
     if (filterStatus) params.set('status', filterStatus);
     if (searchQuery.trim()) params.set('search', searchQuery.trim());
-    const res = await fetch(`/api/tasks?${params}`);
-    setTasks((await res.json()).tasks || []);
+    const res = await fetch(`/api/tasks?${params}`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json().catch(() => ({}));
+    if (seq !== fetchSeq.current) return;
+    const incoming = (data.tasks || []) as Task[];
+    const pendingId = statusPendingIdRef.current;
+    const openId = selectedTaskIdRef.current;
+    setTasks((prev) => mergeLiveTaskList(incoming, prev, pendingId));
+    if (!openId) return;
+    const updated = incoming.find((task) => task.id === openId);
+    if (!updated) return;
+    setSelectedTask((prev) => {
+      if (!prev || prev.id !== openId) return prev;
+      const next = { ...prev, ...updated };
+      if (pendingId === openId) next.status = prev.status;
+      return next;
+    });
   }, [filterAssignee, filterStatus, searchQuery, taskScope]);
 
   useEffect(() => {
@@ -342,6 +368,7 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => { if (user && taskScope) fetchTasks(); }, [user, taskScope, fetchTasks]);
+  useLiveTaskList(Boolean(user), fetchTasks);
 
   useEffect(() => {
     if (!taskScope) return;
@@ -638,6 +665,7 @@ export default function DashboardPage() {
     if (!previous || previous === status) return;
     setTasks((prev) => prev.map((task) => task.id === id ? { ...task, status } : task));
     setSelectedTask((prev) => prev && prev.id === id ? { ...prev, status } : prev);
+    statusPendingIdRef.current = id;
     setStatusPendingId(id);
     try {
       const res = await fetch(`/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
@@ -649,6 +677,7 @@ export default function DashboardPage() {
       setSelectedTask((prev) => prev && prev.id === id ? { ...prev, status: previous } : prev);
       setError('Could not update status');
     } finally {
+      if (statusPendingIdRef.current === id) statusPendingIdRef.current = null;
       setStatusPendingId((current) => current === id ? null : current);
     }
   };

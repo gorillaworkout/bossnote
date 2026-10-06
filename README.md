@@ -131,6 +131,39 @@ Run it from the app directory with the server env loaded (same pattern as the da
 cd /home/ubuntu/apps/bossnote && set -a && . ./.env && set +a && node scripts/cleanup-old-tasks.mjs
 ```
 
+## Live task list
+
+Open dashboards (PC and phone) subscribe to `GET /api/tasks/events` with Server-Sent Events. The browser sends the existing `bn_token` cookie. Web Push and Lark stay as they are — push still alerts a closed or background phone; it does not update an open list, and a desktop session often has no push subscription.
+
+After a task is created, reassigned, status-changed, replied to, retranscribed, or its screenshots change, the server publishes `{ "type": "tasks" }` to every connected dashboard in this Node process and runs `pg_notify('bossnote_tasks', '')`. The event has no task body. Each open session refetches `GET /api/tasks` with its current scope (**Assigned to me**, **Created by me**, or **All**), status filter, and search, so a task only appears where that user is already allowed to see it.
+
+The stream sends `retry: 3000` so the browser reconnects after a drop, a 15s comment heartbeat so proxies do not treat the tab as idle, and a refetch when the stream reconnects or the tab becomes visible again.
+
+No new environment variables. Run **one Node process** for the app (`npm start`, or PM2 fork mode with `instances: 1`). `pg_notify` also wakes other processes that share `DATABASE_URL` and are serving `/api/tasks/events`, but a single process is the setup this app deploys with.
+
+### Oracle nginx
+
+SSE is one long HTTP response. If nginx buffers it, the assignee's list stays stale until the proxy times out. Proxy this path with buffering off. The app also sends `X-Accel-Buffering: no` and `Cache-Control: no-cache, no-transform`. `Content-Type` is `text/event-stream`.
+
+```nginx
+location /api/tasks/events {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection '';
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    add_header X-Accel-Buffering no;
+}
+```
+
+Keep the same `proxy_set_header` values the rest of the BossNote site already uses (including the cookie). Do not add `proxy_buffering on` for `/api/`.
+
 ## Deploy notes
 
 1. `npm i`
