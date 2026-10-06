@@ -1,6 +1,7 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildAssigneeDmText,
   buildTaskNotifyText,
   formatLarkMention,
   getTenantToken,
@@ -12,6 +13,7 @@ import {
   resetLarkStateForTests,
   resolveAssigneeOpenId,
   sendGroupText,
+  sendUserText,
 } from './lark.ts';
 
 const originalFetch = globalThis.fetch;
@@ -146,6 +148,39 @@ describe('buildTaskNotifyText', () => {
       text,
       'New task: Review deck\nFrom: Bayu\nAssignee: <at user_id="ou_ian_open">Ian</at>\nPriority: high',
     );
+  });
+});
+
+describe('buildAssigneeDmText', () => {
+  it('writes a short new-task reminder and a task link', () => {
+    process.env.BOSSNOTE_URL = 'https://bossnote.example/';
+    const text = buildAssigneeDmText({
+      title: 'Review deck',
+      creatorName: 'Bayu',
+      assigneeName: 'Ian',
+      assigneeOpenId: 'ou_ian',
+      taskId: 'task 1',
+      priority: 'high',
+    });
+    assert.equal(
+      text,
+      'New task for you: Review deck\nFrom: Bayu\nPriority: high\nhttps://bossnote.example/dashboard?task=task%201',
+    );
+    assert.doesNotMatch(text, /Assignee:/);
+    assert.doesNotMatch(text, /<at /);
+  });
+
+  it('uses a reassign heading and omits the link when no public URL is set', () => {
+    delete process.env.BOSSNOTE_URL;
+    delete process.env.APP_URL;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+    const text = buildAssigneeDmText({
+      title: 'Follow up vendor',
+      creatorName: 'Sandra',
+      assigneeName: 'Bayu',
+      kind: 'reassign',
+    });
+    assert.equal(text, 'Task reassigned to you: Follow up vendor\nFrom: Sandra\nPriority: medium');
   });
 });
 
@@ -421,10 +456,119 @@ describe('resolveAssigneeOpenId / notifyLarkTaskAsync', () => {
       priority: 'medium',
     });
     assert.equal(ok, true);
-    const msgCall = calls.find((c) => c.url.includes('/im/v1/messages'));
-    const body = JSON.parse(String(msgCall?.init?.body)) as { content: string };
+    const groupCall = calls.find((c) => c.url.includes('receive_id_type=chat_id'));
+    const body = JSON.parse(String(groupCall?.init?.body)) as { content: string; receive_id: string };
+    assert.equal(body.receive_id, 'oc_test_chat');
     assert.deepEqual(JSON.parse(body.content), {
       text: 'New task: Review deck\nFrom: Bayu\nAssignee: <at user_id="ou_ian_env">Ian</at>\nPriority: medium',
     });
+    const dmCall = calls.find((c) => c.url.includes('receive_id_type=open_id'));
+    assert.ok(dmCall);
+    const dm = JSON.parse(String(dmCall?.init?.body)) as { receive_id: string; content: string };
+    assert.equal(dm.receive_id, 'ou_ian_env');
+    assert.deepEqual(JSON.parse(dm.content), {
+      text: 'New task for you: Review deck\nFrom: Bayu\nPriority: medium',
+    });
+  });
+
+  it('resolves Boss, Ian, and Bayu from LARK_OPEN_IDS without hardcoded ids', async () => {
+    clearLarkEnv();
+    process.env.LARK_OPEN_IDS = 'Boss:ou_boss,Ian:ou_ian,Bayu:ou_bayu';
+    assert.equal(await resolveAssigneeOpenId({ assigneeName: 'Boss' }), 'ou_boss');
+    assert.equal(await resolveAssigneeOpenId({ assigneeName: 'Ian', assigneeId: 'boss-001' }), 'ou_ian');
+    assert.equal(await resolveAssigneeOpenId({ assigneeName: 'Bayu', assigneeId: 'bayu-001' }), 'ou_bayu');
+  });
+
+  it('skips the DM when the assignee open_id cannot be resolved', async () => {
+    setLarkEnv();
+    delete process.env.LARK_OPEN_IDS;
+    delete process.env.BOSSNOTE_URL;
+    const calls = mockFetch((url) => {
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return jsonResponse({ code: 0, msg: 'ok', tenant_access_token: 't-abc', expire: 7200 });
+      }
+      if (url.includes('/members')) {
+        return jsonResponse({ code: 99991672, msg: 'no permission' }, 400);
+      }
+      if (url.includes('/im/v1/messages')) {
+        return jsonResponse({ code: 0, msg: 'ok' });
+      }
+      return jsonResponse({ code: 1, msg: `unexpected ${url}` }, 404);
+    });
+    const ok = await notifyLarkTaskAsync({
+      title: 'Review deck',
+      creatorName: 'Bayu',
+      assigneeName: 'Ian',
+      priority: 'high',
+    });
+    assert.equal(ok, true);
+    assert.equal(calls.filter((c) => c.url.includes('receive_id_type=chat_id')).length, 1);
+    assert.equal(calls.filter((c) => c.url.includes('receive_id_type=open_id')).length, 0);
+  });
+
+  it('keeps the group post when the assignee DM is rejected', async () => {
+    setLarkEnv();
+    process.env.LARK_OPEN_IDS = 'Ian:ou_ian_env';
+    delete process.env.BOSSNOTE_URL;
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(' '));
+    };
+    const calls = mockFetch((url) => {
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return jsonResponse({ code: 0, msg: 'ok', tenant_access_token: 't-abc', expire: 7200 });
+      }
+      if (url.includes('receive_id_type=open_id')) {
+        return jsonResponse({ code: 230002, msg: 'bot cannot dm user' }, 400);
+      }
+      if (url.includes('receive_id_type=chat_id')) {
+        return jsonResponse({ code: 0, msg: 'ok' });
+      }
+      return jsonResponse({ code: 1, msg: `unexpected ${url}` }, 404);
+    });
+    try {
+      const ok = await notifyLarkTaskAsync({
+        title: 'Review deck',
+        creatorName: 'Bayu',
+        creatorId: 'bayu-001',
+        assigneeName: 'Ian',
+        assigneeId: 'boss-001',
+        priority: 'high',
+      });
+      assert.equal(ok, true);
+      assert.equal(calls.filter((c) => c.url.includes('receive_id_type=chat_id')).length, 1);
+      assert.equal(calls.filter((c) => c.url.includes('receive_id_type=open_id')).length, 1);
+      assert.match(errors.join('\n'), /dm failed/);
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  it('DMs only the assignee when they created the task for themselves', async () => {
+    setLarkEnv();
+    process.env.LARK_OPEN_IDS = 'Bayu:ou_bayu';
+    delete process.env.BOSSNOTE_URL;
+    const calls = mockFetch((url) => {
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return jsonResponse({ code: 0, msg: 'ok', tenant_access_token: 't-abc', expire: 7200 });
+      }
+      if (url.includes('/im/v1/messages')) return jsonResponse({ code: 0, msg: 'ok' });
+      return jsonResponse({ code: 1, msg: `unexpected ${url}` }, 404);
+    });
+    const ok = await notifyLarkTaskAsync({
+      title: 'My reminder',
+      creatorName: 'Bayu',
+      creatorId: 'bayu-001',
+      assigneeName: 'Bayu',
+      assigneeId: 'bayu-001',
+      priority: 'low',
+    });
+    assert.equal(ok, true);
+    const dms = calls.filter((c) => c.url.includes('receive_id_type=open_id'));
+    assert.equal(dms.length, 1);
+    const dm = JSON.parse(String(dms[0]?.init?.body)) as { receive_id: string };
+    assert.equal(dm.receive_id, 'ou_bayu');
+    assert.equal(await sendUserText('not a valid id', 'hello'), false);
   });
 });
