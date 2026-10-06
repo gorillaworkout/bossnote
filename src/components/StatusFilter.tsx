@@ -1,24 +1,9 @@
 'use client';
 
-import { TASK_STATUSES, type TaskStatus } from '@/lib/task-status';
-
-/** Filled and idle colors match StatusButtons so the active filter reads as the same chip. */
-const ACTIVE: Record<TaskStatus, string> = {
-  todo: 'bg-zinc-600 text-zinc-50 border-zinc-400',
-  in_progress: 'bg-blue-600 text-white border-blue-400',
-  waiting: 'bg-red-600 text-white border-red-400',
-  done: 'bg-emerald-600 text-white border-emerald-300',
-};
-
-const IDLE: Record<TaskStatus, string> = {
-  todo: 'bg-transparent text-zinc-400 border-zinc-700 hover:border-zinc-500 hover:text-zinc-100',
-  in_progress: 'bg-transparent text-blue-300/80 border-blue-900 hover:border-blue-500 hover:text-blue-100',
-  waiting: 'bg-transparent text-red-300/80 border-red-900 hover:border-red-500 hover:text-red-100',
-  done: 'bg-transparent text-emerald-300/80 border-emerald-900 hover:border-emerald-500 hover:text-emerald-100',
-};
+import { TASK_STATUSES } from '@/lib/task-status';
 
 const CHIP =
-  'border font-semibold transition-colors min-h-8 px-2 py-1 text-[11px] leading-none rounded-md whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/60';
+  'inline-flex items-center justify-center h-7 px-2 text-[11px] font-medium leading-none rounded-md whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/60';
 
 export function StatusFilter({
   value,
@@ -37,7 +22,7 @@ export function StatusFilter({
         type="button"
         aria-pressed={value === ''}
         onClick={() => onChange('')}
-        className={`${CHIP} ${value === '' ? 'bg-violet-600 text-white border-violet-400' : 'bg-transparent text-zinc-400 border-zinc-700 hover:border-zinc-500 hover:text-zinc-100'}`}
+        className={`${CHIP} ${value === '' ? 'bg-violet-600 text-white' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
       >
         All
       </button>
@@ -49,7 +34,7 @@ export function StatusFilter({
             type="button"
             aria-pressed={active}
             onClick={() => onChange(status.value)}
-            className={`${CHIP} ${active ? ACTIVE[status.value] : IDLE[status.value]}`}
+            className={`${CHIP} ${active ? 'bg-violet-600 text-white' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
           >
             {status.label}
           </button>

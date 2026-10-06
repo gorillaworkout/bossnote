@@ -27,6 +27,9 @@ describe('status buttons', () => {
     assert.match(buttons, /stopPropagation/);
     assert.match(buttons, /TASK_STATUSES/);
     assert.match(buttons, /size === 'compact' \? status\.shortLabel : status\.label/);
+    assert.match(buttons, /h-6 px-1\.5 text-\[10px\]/);
+    assert.match(buttons, /h-7 px-2 text-\[11px\]/);
+    assert.doesNotMatch(buttons, /min-h-9|min-h-11|uppercase|tracking-wide/);
   });
 
   it('replaces the status dropdown on the board card and the task detail', () => {
@@ -55,7 +58,10 @@ describe('status buttons', () => {
     assert.match(statusFilter, />\s*All\s*</);
     assert.match(statusFilter, /TASK_STATUSES/);
     assert.match(statusFilter, /\{status\.label\}/);
-    assert.doesNotMatch(statusFilter, /<select/);
+    assert.match(statusFilter, /h-7 px-2 text-\[11px\]/);
+    assert.match(statusFilter, /bg-violet-600 text-white/);
+    assert.match(statusFilter, /bg-zinc-900 text-zinc-400/);
+    assert.doesNotMatch(statusFilter, /min-h-8|min-h-9|min-h-11|<select/);
     assert.match(dashboard, /if \(filterStatus\) params\.set\('status', filterStatus\)/);
   });
 
