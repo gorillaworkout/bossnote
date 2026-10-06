@@ -7,6 +7,7 @@ import { describe, it } from 'node:test';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dashboard = readFileSync(join(root, 'src/app/dashboard/page.tsx'), 'utf8');
 const buttons = readFileSync(join(root, 'src/components/StatusButtons.tsx'), 'utf8');
+const statusFilter = readFileSync(join(root, 'src/components/StatusFilter.tsx'), 'utf8');
 
 function sliceBetween(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -38,7 +39,24 @@ describe('status buttons', () => {
     assert.doesNotMatch(card, /<select/);
     assert.doesNotMatch(detail, /<select value=\{t\.status\}/);
     assert.doesNotMatch(dashboard, /<select value=\{t\.status\}/);
-    assert.match(dashboard, /All status/);
+    assert.doesNotMatch(dashboard, /All status/);
+  });
+
+  it('filters the toolbar by status with buttons instead of a dropdown', () => {
+    const toolbar = sliceBetween(dashboard, 'TOOLBAR', 'BODY');
+    assert.match(dashboard, /import \{ StatusFilter \} from '@\/components\/StatusFilter'/);
+    assert.match(toolbar, /<StatusFilter value=\{filterStatus\} onChange=\{setFilterStatus\} \/>/);
+    assert.match(toolbar, /<select value=\{filterAssignee\}/);
+    assert.doesNotMatch(toolbar, /<select value=\{filterStatus\}/);
+    assert.doesNotMatch(toolbar, /All status/);
+    assert.match(statusFilter, /role="group"/);
+    assert.match(statusFilter, /aria-label="Filter by status"/);
+    assert.match(statusFilter, /aria-pressed/);
+    assert.match(statusFilter, />\s*All\s*</);
+    assert.match(statusFilter, /TASK_STATUSES/);
+    assert.match(statusFilter, /\{status\.label\}/);
+    assert.doesNotMatch(statusFilter, /<select/);
+    assert.match(dashboard, /if \(filterStatus\) params\.set\('status', filterStatus\)/);
   });
 
   it('still saves status with the existing task update request', () => {
