@@ -20,6 +20,8 @@ import { hasUsableTaskText, isVoiceUnclearError } from '@/lib/voice-clarity';
 import { uploadTaskImage } from '@/components/upload-task-image';
 import { TaskImageField } from '@/components/TaskImageField';
 import { TaskScreenshot } from '@/components/TaskScreenshot';
+import { StatusButtons } from '@/components/StatusButtons';
+import { TASK_STATUSES, type TaskStatus } from '@/lib/task-status';
 
 /* ── Types ── */
 
@@ -71,23 +73,6 @@ const AlertIcon = () => (
 const PriorityDot = ({ level }: { level: string }) => {
   const map: Record<string, string> = { high: 'bg-red-400 shadow-[0_0_6px_rgb(248_113_113/0.4)]', medium: 'bg-amber-400 shadow-[0_0_4px_rgb(251_191_36/0.3)]', low: 'bg-zinc-600' };
   return <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 mt-[5px] ${map[level] || map.low}`} />;
-};
-
-const StatusBadge = ({ status }: { status: string }) => {
-  const map: Record<string, string> = {
-    todo: 'bg-zinc-800 text-zinc-400',
-    in_progress: 'bg-blue-950/60 text-blue-400',
-    waiting: 'bg-red-950/50 text-red-400',
-    done: 'bg-emerald-950/50 text-emerald-400',
-  };
-  const labels: Record<string, string> = {
-    todo: 'To Do', in_progress: 'In Progress', waiting: 'Stuck', done: 'Done',
-  };
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] text-[10px] font-medium tracking-wide uppercase ${map[status] || map.todo}`}>
-      {status === 'done' && <CheckIcon />}{labels[status] || status}
-    </span>
-  );
 };
 
 const Spinner = ({ className = 'w-3.5 h-3.5 border-2 border-violet-400' }: { className?: string }) => (
@@ -317,7 +302,8 @@ export default function DashboardPage() {
   const questionRecorderRef = useRef<MediaRecorder | null>(null);
   const createInFlightRef = useRef(false);
   const [confirmDelete, setConfirmDelete] = useState<Task | null>(null);
-  const [kanbanTab, setKanbanTab] = useState<'todo' | 'in_progress' | 'waiting' | 'done'>('todo');
+  const [kanbanTab, setKanbanTab] = useState<TaskStatus>('todo');
+  const [statusPendingId, setStatusPendingId] = useState<string | null>(null);
   const [mobileDetail, setMobileDetail] = useState(false);
 
   /* ── Data fetching ── */
@@ -567,7 +553,27 @@ export default function DashboardPage() {
       setDetailImageProgress(null);
     }
   };
-  const updateStatus = async (id: string, status: string) => { await fetch(`/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); fetchTasks(); if (selectedTask?.id === id) setSelectedTask(prev => prev ? { ...prev, status } : null); };
+  const updateStatus = async (id: string, status: string) => {
+    const fromList = tasks.find((task) => task.id === id)?.status;
+    const fromDetail = selectedTask?.id === id ? selectedTask.status : undefined;
+    const previous = fromList ?? fromDetail;
+    if (!previous || previous === status) return;
+    setTasks((prev) => prev.map((task) => task.id === id ? { ...task, status } : task));
+    setSelectedTask((prev) => prev && prev.id === id ? { ...prev, status } : prev);
+    setStatusPendingId(id);
+    try {
+      const res = await fetch(`/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      if (!res.ok) throw new Error('Could not update status');
+      await fetchTasks();
+      setSelectedTask((prev) => prev && prev.id === id ? { ...prev, status } : prev);
+    } catch {
+      setTasks((prev) => prev.map((task) => task.id === id ? { ...task, status: previous } : task));
+      setSelectedTask((prev) => prev && prev.id === id ? { ...prev, status: previous } : prev);
+      setError('Could not update status');
+    } finally {
+      setStatusPendingId((current) => current === id ? null : current);
+    }
+  };
   const reassignTask = async (id: string, nextAssigneeId: string) => {
     if (!nextAssigneeId) return;
     const assignee = users.find((u) => u.id === nextAssigneeId);
@@ -648,6 +654,14 @@ export default function DashboardPage() {
               {hasPendingQ && <span className="text-[10px] text-amber-500 font-medium">{task.questions.length - (task.answered_questions?.length || 0)} ⚡</span>}
               {task.ai_error && <AlertIcon />}
             </div>
+            <div className="mt-2">
+              <StatusButtons
+                size="compact"
+                value={task.status}
+                disabled={statusPendingId === task.id}
+                onChange={(status) => { void updateStatus(task.id, status); }}
+              />
+            </div>
           </div>
           <button onClick={e => { e.stopPropagation(); setConfirmDelete(task); }}
             className="sm:opacity-0 sm:group-hover:opacity-100 text-zinc-500 hover:text-red-400 p-0.5 transition-all flex-shrink-0" title="Delete"><TrashIcon/></button>
@@ -661,7 +675,7 @@ export default function DashboardPage() {
     return (
     <>
       {/* ── Title row ── */}
-      <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="flex items-start justify-between gap-4 mb-3">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold text-zinc-100 leading-snug">{heading.primary}</h2>
           {heading.secondary && <p className="text-[13px] text-zinc-500 mt-0.5">{heading.secondary}</p>}
@@ -674,12 +688,14 @@ export default function DashboardPage() {
             <AssigneeSelect users={users} value={t.assignee_id} onChange={(id) => { void reassignTask(t.id, id); }} />
           </div>
         </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <select value={t.status} onChange={e => updateStatus(t.id, e.target.value)} className="input-field px-2 py-1 text-[11px] cursor-pointer">
-            <option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="waiting">Stuck</option><option value="done">Done</option>
-          </select>
-          <button onClick={() => setConfirmDelete(t)} className="p-1.5 text-zinc-700 hover:text-red-400 hover:bg-red-950/30 rounded-md transition-colors" title="Delete"><TrashIcon/></button>
-        </div>
+        <button onClick={() => setConfirmDelete(t)} className="p-1.5 text-zinc-700 hover:text-red-400 hover:bg-red-950/30 rounded-md transition-colors flex-shrink-0" title="Delete"><TrashIcon/></button>
+      </div>
+      <div className="mb-5">
+        <StatusButtons
+          value={t.status}
+          disabled={statusPendingId === t.id}
+          onChange={(status) => { void updateStatus(t.id, status); }}
+        />
       </div>
 
       <TaskScreenshot
@@ -692,7 +708,6 @@ export default function DashboardPage() {
 
       <div className="flex items-center gap-2 mb-5">
         <span className={`px-2 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wider ${t.priority === 'high' ? 'bg-red-950/60 text-red-400' : t.priority === 'medium' ? 'bg-amber-950/50 text-amber-400' : 'bg-zinc-800 text-zinc-500'}`}>{t.priority}</span>
-        <StatusBadge status={t.status} />
       </div>
 
       {/* ── AI Error ── */}
@@ -919,9 +934,8 @@ export default function DashboardPage() {
         {/* ── Desktop Kanban board ── */}
         <div className="hidden sm:flex flex-col border-r border-[var(--border)] bg-[var(--bg)] overflow-hidden" style={{ width: selectedTask ? '55%' : '100%' }}>
           <div className="flex-1 flex gap-3 p-4 overflow-x-auto overflow-y-hidden">
-            {(['todo', 'in_progress', 'waiting', 'done'] as const).map(status => {
+            {TASK_STATUSES.map(({ value: status, label: colLabel }) => {
               const colTasks = tasks.filter(t => t.status === status);
-              const colLabel = { todo: 'To Do', in_progress: 'In Progress', waiting: 'Stuck', done: 'Done' }[status];
               const colHeaderBg = status === 'todo' ? 'bg-zinc-950/20' : status === 'in_progress' ? 'bg-blue-950/20' : status === 'waiting' ? 'bg-red-950/20' : 'bg-emerald-950/20';
               const colDot = status === 'todo' ? 'bg-zinc-500' : status === 'in_progress' ? 'bg-blue-500' : status === 'waiting' ? 'bg-red-500' : 'bg-emerald-500';
               return (
@@ -953,9 +967,8 @@ export default function DashboardPage() {
         <div className="sm:hidden flex flex-col flex-1 overflow-hidden">
           {/* Status tabs */}
           <div className="flex gap-1 p-2 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0">
-            {(['todo', 'in_progress', 'waiting', 'done'] as const).map(s => {
+            {TASK_STATUSES.map(({ value: s, shortLabel: label }) => {
               const count = tasks.filter(t => t.status === s).length;
-              const label = { todo: 'To Do', in_progress: 'Progress', waiting: 'Stuck', done: 'Done' }[s];
               return (
                 <button key={s} onClick={() => setKanbanTab(s)}
                   className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all text-center ${kanbanTab === s ? 'bg-zinc-800 text-zinc-200 shadow-sm' : 'text-zinc-500'}`}>
