@@ -4,6 +4,7 @@ import { queryAll, queryOne, execute } from '@/lib/database';
 import { processVoiceNote, getUserModel, normalizeAudioModel } from '@/lib/ai';
 import { resolveAssigneeFromHint } from '@/lib/assignee';
 import { readVoice } from '@/lib/voice-storage';
+import { publishTaskListChange } from '@/lib/task-live';
 
 /** Re-runs the AI pipeline on an already-stored voice note. */
 export async function POST(
@@ -63,10 +64,12 @@ export async function POST(
        WHERE t.id = ?`,
       [id],
     );
+    publishTaskListChange();
     return NextResponse.json({ task: updated, ok: true });
   } catch (e) {
     const message = (e as Error).message;
     await execute('UPDATE tasks SET ai_error = ? WHERE id = ?', [message, id]);
+    publishTaskListChange();
     return NextResponse.json({ error: message }, { status: 502 });
   }
 }
