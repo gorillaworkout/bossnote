@@ -868,8 +868,8 @@ export default function DashboardPage() {
       {notice && <div className="bg-emerald-950/30 border-b border-emerald-900/30 text-emerald-400 text-[12px] flex items-center px-4 py-2 flex-shrink-0"><span className="flex-1">{notice}</span><button onClick={() => setNotice(null)} className="text-emerald-500/70 hover:text-emerald-400 ml-3">Dismiss</button></div>}
 
       {/* ═══════ TOOLBAR ═══════ */}
-      <div className="min-h-11 flex items-center gap-2 px-4 py-1.5 border-b border-[var(--border)] bg-[var(--surface)] flex-shrink-0 flex-wrap">
-        <div role="tablist" aria-label="Tasks" className="flex w-full sm:w-auto rounded-lg bg-zinc-900 p-0.5">
+      <div className="border-b border-[var(--border)] bg-[var(--surface)] flex-shrink-0">
+        <div role="tablist" aria-label="Tasks" className="grid grid-cols-3 gap-1 p-2">
           {TASK_LIST_SCOPES.map((id) => (
             <button
               key={id}
@@ -877,12 +877,13 @@ export default function DashboardPage() {
               role="tab"
               aria-selected={taskScope === id}
               onClick={() => setTaskScope(id)}
-              className={`flex-1 sm:flex-none min-h-11 px-2 py-1.5 rounded-md text-[11px] sm:text-[12px] font-medium text-center leading-tight transition-colors ${taskScope === id ? 'bg-violet-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
+              className={`min-h-11 px-1.5 py-1.5 rounded-lg text-[12px] font-medium text-center leading-tight transition-colors ${taskScope === id ? 'bg-violet-600 text-white' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
             >
               {taskListScopeLabel(id)}
             </button>
           ))}
         </div>
+        <div className="min-h-11 flex items-center gap-2 px-4 pb-2 flex-wrap">
         {isBoss && taskScope === 'all' && (
           <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} className="input-field px-2.5 py-1 text-[12px] w-auto cursor-pointer">
             <option value="">Everyone</option>
@@ -908,6 +909,7 @@ export default function DashboardPage() {
         <div className="relative ml-auto">
           <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search…" className="input-field pl-3 pr-7 py-1 text-[12px] w-36"/>
           {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 text-[10px]">✕</button>}
+        </div>
         </div>
       </div>
 
