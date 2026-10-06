@@ -23,6 +23,7 @@ import { confirmationAction, needsConfirmation, unansweredCount } from '@/lib/ne
 import { TaskImageField } from '@/components/TaskImageField';
 import { TaskScreenshot } from '@/components/TaskScreenshot';
 import { StatusButtons } from '@/components/StatusButtons';
+import { StatusFilter } from '@/components/StatusFilter';
 import { useLiveTaskList } from '@/components/use-live-task-list';
 import { mergeLiveTaskList } from '@/lib/task-list-live';
 import { TASK_STATUSES, type TaskStatus } from '@/lib/task-status';
@@ -1050,13 +1051,7 @@ export default function DashboardPage() {
             )}
           </select>
         )}
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="input-field px-2.5 py-1 text-[12px] w-auto cursor-pointer">
-          <option value="">All status</option>
-          <option value="todo">To Do</option>
-          <option value="in_progress">In Progress</option>
-          <option value="waiting">Stuck</option>
-          <option value="done">Done</option>
-        </select>
+        <StatusFilter value={filterStatus} onChange={setFilterStatus} />
         <div className="relative ml-auto">
           <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search…" className="input-field pl-3 pr-7 py-1 text-[12px] w-36"/>
           {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 text-[10px]">✕</button>}
