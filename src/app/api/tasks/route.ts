@@ -18,6 +18,7 @@ import {
 import { sendPushToUser } from '@/lib/push';
 import { notifyLarkTask } from '@/lib/lark';
 import { assignmentPushUrl } from '@/lib/task-access';
+import { publishTaskListChangeSafe } from '@/lib/task-events';
 import { buildTaskListQuery } from '@/lib/task-list-scope';
 import { saveVoice, voiceExt } from '@/lib/voice-storage';
 import { v4 as uuidv4 } from 'uuid';
@@ -196,6 +197,12 @@ export async function POST(request: NextRequest) {
       creatorName: user.name,
       creatorId: user.id,
     });
+    publishTaskListChangeSafe({
+      id: taskId,
+      assignee_id: formUser.id,
+      created_by: user.id,
+      previous_assignee_id: null,
+    });
     return NextResponse.json({ task, ai_error: null, ok: true }, { status: 201 });
   }
 
@@ -282,6 +289,12 @@ export async function POST(request: NextRequest) {
     priority: ai?.priority ?? 'medium',
     creatorName: user.name,
     creatorId: user.id,
+  });
+  publishTaskListChangeSafe({
+    id: taskId,
+    assignee_id: assigneeId,
+    created_by: user.id,
+    previous_assignee_id: null,
   });
   return NextResponse.json({ task, ai_error: null, ok: true }, { status: 201 });
 }
