@@ -2,14 +2,14 @@ import { Pool } from 'pg';
 
 let pool: Pool | undefined;
 
-export function databaseConnectionString(): string {
+function databaseUrl(): string {
   const value = process.env.DATABASE_URL;
   if (!value) throw new Error('DATABASE_URL is required');
   return value;
 }
 
 export function getDb(): Pool {
-  if (!pool) pool = new Pool({ connectionString: databaseConnectionString() });
+  if (!pool) pool = new Pool({ connectionString: databaseUrl() });
   return pool;
 }
 

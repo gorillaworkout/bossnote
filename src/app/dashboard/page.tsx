@@ -22,12 +22,6 @@ import { TaskImageField } from '@/components/TaskImageField';
 import { TaskScreenshot } from '@/components/TaskScreenshot';
 import { StatusButtons } from '@/components/StatusButtons';
 import { TASK_STATUSES, type TaskStatus } from '@/lib/task-status';
-import {
-  shouldManuallyReconnectEventSource,
-  TASK_LIST_POLL_MS,
-  TASK_STREAM_PATH,
-  TASK_STREAM_RETRY_MS,
-} from '@/lib/task-live';
 
 /* ── Types ── */
 
@@ -344,53 +338,6 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => { if (user && taskScope) fetchTasks(); }, [user, taskScope, fetchTasks]);
-
-  const fetchTasksRef = useRef(fetchTasks);
-  fetchTasksRef.current = fetchTasks;
-
-  useEffect(() => {
-    if (!user) return;
-    let source: EventSource | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    let stopped = false;
-    let openedOnce = false;
-
-    const connect = () => {
-      if (stopped) return;
-      source?.close();
-      source = new EventSource(TASK_STREAM_PATH);
-      source.addEventListener('tasks', () => { void fetchTasksRef.current(); });
-      source.onopen = () => {
-        if (openedOnce) void fetchTasksRef.current();
-        openedOnce = true;
-      };
-      source.onerror = () => {
-        if (stopped || !source || !shouldManuallyReconnectEventSource(source.readyState)) return;
-        const dead = source;
-        source = null;
-        dead.onerror = null;
-        dead.close();
-        if (retryTimer) clearTimeout(retryTimer);
-        retryTimer = setTimeout(connect, TASK_STREAM_RETRY_MS);
-      };
-    };
-    connect();
-
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void fetchTasksRef.current();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    pollTimer = setInterval(() => { void fetchTasksRef.current(); }, TASK_LIST_POLL_MS);
-
-    return () => {
-      stopped = true;
-      source?.close();
-      if (retryTimer) clearTimeout(retryTimer);
-      if (pollTimer) clearInterval(pollTimer);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [user]);
 
   useEffect(() => {
     if (!taskScope) return;

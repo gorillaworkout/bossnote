@@ -3,7 +3,6 @@ import { getSession } from '@/lib/auth';
 import { queryOne, execute } from '@/lib/database';
 import { deleteTaskImage } from '@/lib/image-storage';
 import { assignmentPushUrl, canViewTask } from '@/lib/task-access';
-import { publishTaskListChangeSafe } from '@/lib/task-events';
 
 export async function GET(
   _request: NextRequest,
@@ -71,12 +70,6 @@ export async function PUT(
       'UPDATE tasks SET status = ?, updated_at = NOW() WHERE id = ?',
       [status, id],
     );
-    publishTaskListChangeSafe({
-      id,
-      assignee_id: String(task.assignee_id),
-      created_by: String(task.created_by),
-      previous_assignee_id: null,
-    });
     return NextResponse.json({ ok: true });
   }
 
@@ -97,12 +90,6 @@ export async function PUT(
       'UPDATE tasks SET assignee_id = ?, updated_at = NOW() WHERE id = ?',
       [nextAssigneeId, id],
     );
-    publishTaskListChangeSafe({
-      id,
-      assignee_id: nextAssigneeId,
-      created_by: String(task.created_by),
-      previous_assignee_id: String(task.assignee_id),
-    });
 
     if (nextAssigneeId !== task.assignee_id) {
       const { sendPushToUser } = await import('@/lib/push');
@@ -141,19 +128,7 @@ export async function DELETE(
   if (user.role !== 'boss') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { id } = await params;
-  const task = await queryOne<{ assignee_id: string; created_by: string }>(
-    'SELECT assignee_id, created_by FROM tasks WHERE id = ?',
-    [id],
-  );
   await execute('DELETE FROM tasks WHERE id = ?', [id]);
   deleteTaskImage(id);
-  if (task) {
-    publishTaskListChangeSafe({
-      id,
-      assignee_id: String(task.assignee_id),
-      created_by: String(task.created_by),
-      previous_assignee_id: null,
-    });
-  }
   return NextResponse.json({ ok: true });
 }
