@@ -353,6 +353,18 @@ async function readJson(response: Response): Promise<unknown> {
   return response.json().catch(() => null);
 }
 
+function trimmedString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function tokenTenantKey(tokenBody: unknown): string {
+  if (!tokenBody || typeof tokenBody !== 'object') return '';
+  // authen/v2/oauth/token documents code, access_token, expires_in, refresh_token,
+  // refresh_token_expires_in, token_type, scope, error, and error_description.
+  // tenant_key is not in that list; read it only when the body includes it.
+  return trimmedString((tokenBody as { tenant_key?: unknown }).tenant_key);
+}
+
 export async function runLarkCallback(input: {
   config: LarkLoginConfig | null;
   oauthCookie: string | undefined;
@@ -428,9 +440,22 @@ export async function runLarkCallback(input: {
   const record = data as { open_id?: unknown; name?: unknown; en_name?: unknown; email?: unknown; tenant_key?: unknown };
   const openId = normalizeLarkOpenId(record.open_id);
   if (!openId) return failure(input.config, 'failed');
-  const tenantKey = typeof record.tenant_key === 'string' ? record.tenant_key : '';
-  if (tenantKey !== input.config.tenantKey) {
-    console.warn('[lark-login] organization rejected', { open_id: openId });
+  const userInfoTenant = trimmedString(record.tenant_key);
+  const tokenTenant = tokenTenantKey(tokenBody);
+  const tenantKey = userInfoTenant || tokenTenant;
+  const envTenant = input.config.tenantKey.trim();
+  const tenantLengths = {
+    open_id: openId,
+    envTenantLen: envTenant.length,
+    userInfoTenantLen: userInfoTenant.length,
+    tokenTenantLen: tokenTenant.length,
+  };
+  if (!tenantKey) {
+    console.warn('[lark-login] missing_tenant', tenantLengths);
+    return failure(input.config, 'org');
+  }
+  if (tenantKey !== envTenant) {
+    console.warn('[lark-login] organization rejected', tenantLengths);
     return failure(input.config, 'org');
   }
 
