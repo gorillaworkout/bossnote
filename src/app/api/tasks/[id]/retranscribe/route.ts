@@ -5,6 +5,7 @@ import { processVoiceNote, getUserModel, normalizeAudioModel } from '@/lib/ai';
 import { resolveAssigneeFromHint } from '@/lib/assignee';
 import { readVoice } from '@/lib/voice-storage';
 import { publishTaskListChange } from '@/lib/task-live';
+import { canViewTask, type TaskParties } from '@/lib/task-access';
 
 /** Re-runs the AI pipeline on an already-stored voice note. */
 export async function POST(
@@ -15,12 +16,18 @@ export async function POST(
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const task = await queryOne<{ voice_path: string; assignee_id: string; created_by: string }>(
-    'SELECT voice_path, assignee_id, created_by FROM tasks WHERE id = ?',
+  const task = await queryOne<TaskParties & { voice_path: string | null }>(
+    `SELECT t.voice_path, t.assignee_id, t.created_by,
+       bu.role AS creator_role, bu.department_id AS creator_department_id,
+       au.role AS assignee_role, au.department_id AS assignee_department_id
+     FROM tasks t
+     JOIN users bu ON t.created_by = bu.id
+     JOIN users au ON t.assignee_id = au.id
+     WHERE t.id = ?`,
     [id],
   );
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  if (user.id !== task.assignee_id && user.id !== task.created_by) {
+  if (!canViewTask(user, task)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   if (!task.voice_path) return NextResponse.json({ error: 'No voice note on this task' }, { status: 400 });

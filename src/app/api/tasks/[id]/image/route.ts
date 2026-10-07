@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { appendTaskImage, deleteTaskImageSlot, readTaskImageAt } from '@/lib/image-storage';
 import { canViewTask } from '@/lib/task-access';
-import { loadTaskForImage, saveTaskGallery } from '@/lib/task-gallery';
+import { loadTaskForImage, saveTaskGallery, type TaskImageRow } from '@/lib/task-gallery';
 import { publishTaskListChange } from '@/lib/task-live';
 import { imageFileResponse } from '@/lib/task-image-response';
 import {
@@ -12,6 +12,17 @@ import {
 } from '@/lib/task-image';
 
 export const dynamic = 'force-dynamic';
+
+function imageParties(task: TaskImageRow) {
+  return {
+    assignee_id: task.assignee_id,
+    created_by: task.created_by,
+    creator_role: task.creator_role,
+    creator_department_id: task.creator_department_id,
+    assignee_role: task.assignee_role,
+    assignee_department_id: task.assignee_department_id,
+  };
+}
 
 export async function GET(
   _request: NextRequest,
@@ -24,7 +35,7 @@ export async function GET(
   const task = await loadTaskForImage(id);
   const paths = task ? taskImagePaths(task) : [];
   if (!task || paths.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  if (!canViewTask(user, task)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!canViewTask(user, imageParties(task))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const index = imageIndexFromPublicPath(id, paths[0]) ?? 0;
   const file = readTaskImageAt(id, index);
@@ -42,7 +53,7 @@ export async function POST(
   const { id } = await params;
   const task = await loadTaskForImage(id);
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  if (!canViewTask(user, task)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!canViewTask(user, imageParties(task))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   let formData: FormData;
   try {

@@ -32,6 +32,7 @@ import { v4 as uuidv4 } from 'uuid';
 export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (user.role === 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { searchParams } = new URL(request.url);
   const { sql, values } = buildTaskListQuery({
@@ -144,6 +145,7 @@ function notifyAssignee(
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (user.role === 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const input = await readCreateInput(request);
   const claim = beginCreateClaim(user.id, input.clientToken);

@@ -2,12 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { deleteTaskImageSlot, readTaskImageAt } from '@/lib/image-storage';
 import { canViewTask } from '@/lib/task-access';
-import { loadTaskForImage, saveTaskGallery } from '@/lib/task-gallery';
+import { loadTaskForImage, saveTaskGallery, type TaskImageRow } from '@/lib/task-gallery';
 import { publishTaskListChange } from '@/lib/task-live';
 import { imageFileResponse } from '@/lib/task-image-response';
 import { TASK_IMAGE_MAX_INDEX, imageIndexFromPublicPath, taskImagePaths } from '@/lib/task-image';
 
 export const dynamic = 'force-dynamic';
+
+function imageParties(task: TaskImageRow) {
+  return {
+    assignee_id: task.assignee_id,
+    created_by: task.created_by,
+    creator_role: task.creator_role,
+    creator_department_id: task.creator_department_id,
+    assignee_role: task.assignee_role,
+    assignee_department_id: task.assignee_department_id,
+  };
+}
 
 function parseIndex(raw: string): number | null {
   if (!/^\d{1,2}$/.test(raw)) return null;
@@ -29,7 +40,7 @@ export async function GET(
 
   const task = await loadTaskForImage(id);
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  if (!canViewTask(user, task)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!canViewTask(user, imageParties(task))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const allowed = taskImagePaths(task).some((publicPath) => imageIndexFromPublicPath(id, publicPath) === index);
   if (!allowed) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -52,7 +63,7 @@ export async function DELETE(
 
   const task = await loadTaskForImage(id);
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  if (!canViewTask(user, task)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!canViewTask(user, imageParties(task))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const remaining = taskImagePaths(task).filter((publicPath) => imageIndexFromPublicPath(id, publicPath) !== index);
   if (remaining.length === taskImagePaths(task).length) {

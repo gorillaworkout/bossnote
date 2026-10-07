@@ -38,7 +38,10 @@ describe('boss assigned-to-me board', () => {
     assert.match(dashboard, /taskScope === 'all'/);
     assert.match(taskListScope, /No tasks created by you/);
     assert.match(taskListScope, /No tasks assigned to you/);
-    assert.match(taskListScope, /\(t\.assignee_id = \? OR t\.created_by = \?\)/);
+    assert.match(taskListScope, /bu\.role = 'boss'/);
+    assert.match(taskListScope, /au\.role = 'boss'/);
+    assert.match(taskListScope, /bu\.department_id = \?/);
+    assert.match(taskListScope, /au\.department_id = \?/);
     assert.match(tasksRoute, /buildTaskListQuery/);
     assert.match(tasksRoute, /searchParams\.get\('scope'\)/);
   });

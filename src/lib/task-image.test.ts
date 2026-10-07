@@ -178,13 +178,60 @@ describe('done-task purge deletes image files', () => {
 });
 
 describe('task visibility and push link', () => {
-  const task = { assignee_id: 'boss-001', created_by: 'bayu-001' };
+  const general = 'dept-general';
+  const other = 'dept-other';
+  const ianTask = {
+    assignee_id: 'bayu-001',
+    created_by: 'boss-001',
+    creator_role: 'boss',
+    creator_department_id: general,
+    assignee_role: 'member',
+    assignee_department_id: general,
+  };
 
-  it('lets the boss and the creator open an assigned task', () => {
-    assert.equal(canViewTask({ id: 'boss-001', role: 'boss' }, task), true);
-    assert.equal(canViewTask({ id: 'prista-001', role: 'boss' }, task), true);
-    assert.equal(canViewTask({ id: 'bayu-001', role: 'member' }, task), true);
-    assert.equal(canViewTask({ id: 'sandra-001', role: 'member' }, task), false);
+  it('lets bosses see every task and members see only their own boss in-department', () => {
+    const ian = { id: 'boss-001', role: 'boss', department_id: general };
+    const prista = { id: 'prista-001', role: 'boss', department_id: other };
+    const bayu = { id: 'bayu-001', role: 'member', department_id: general };
+    const sandra = { id: 'sandra-001', role: 'member', department_id: general };
+    assert.equal(canViewTask(ian, ianTask), true);
+    assert.equal(canViewTask(prista, ianTask), true);
+    assert.equal(canViewTask(bayu, ianTask), true);
+    assert.equal(canViewTask(sandra, ianTask), false);
+    assert.equal(canViewTask({ id: 'admin-001', role: 'admin', department_id: null }, ianTask), false);
+
+    const bayuToPrista = {
+      ...ianTask,
+      assignee_id: 'prista-001',
+      created_by: 'bayu-001',
+      creator_role: 'member',
+      assignee_role: 'boss',
+      assignee_department_id: general,
+    };
+    assert.equal(canViewTask(bayu, bayuToPrista), true);
+    assert.equal(canViewTask(sandra, bayuToPrista), false);
+
+    const pristaToNia = {
+      assignee_id: 'nia-001',
+      created_by: 'prista-001',
+      creator_role: 'boss',
+      creator_department_id: other,
+      assignee_role: 'member',
+      assignee_department_id: other,
+    };
+    assert.equal(canViewTask(ian, pristaToNia), true);
+    assert.equal(canViewTask(bayu, pristaToNia), false);
+
+    const bayuToSandra = {
+      assignee_id: 'sandra-001',
+      created_by: 'bayu-001',
+      creator_role: 'member',
+      creator_department_id: general,
+      assignee_role: 'member',
+      assignee_department_id: general,
+    };
+    assert.equal(canViewTask(bayu, bayuToSandra), false);
+    assert.equal(canViewTask(ian, bayuToSandra), true);
   });
 
   it('opens the assigned task from a phone notification', () => {
