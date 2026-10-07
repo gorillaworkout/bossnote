@@ -148,6 +148,19 @@ function scripted(steps: Array<{ status?: number; body: unknown }>) {
   return { fetchImpl, seen };
 }
 
+async function withWarnings<T>(run: () => Promise<T>): Promise<{ result: T; warnings: unknown[][] }> {
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args);
+  };
+  try {
+    return { result: await run(), warnings };
+  } finally {
+    console.warn = originalWarn;
+  }
+}
+
 describe('Lark authorize URL', () => {
   it('sends the S256 challenge and the email scope only', () => {
     const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
@@ -599,6 +612,112 @@ describe('runLarkCallback provisioning', () => {
     assert.equal(JSON.stringify(result).includes('secret_test'), false);
     assert.deepEqual(store.rows.find((row) => row.id === 'bayu-001'), before);
     assert.equal(result.user && 'password_hash' in result.user, false);
+  });
+});
+
+describe('Lark tenant resolution', () => {
+  const state = 'state-value';
+  const codeVerifier = 'verifier-value';
+  const lengths = (openId: string, envTenantLen: number, userInfoTenantLen: number, tokenTenantLen: number) => ({
+    open_id: openId,
+    envTenantLen,
+    userInfoTenantLen,
+    tokenTenantLen,
+  });
+
+  async function callback(options: {
+    tenantKey?: string;
+    token?: Record<string, unknown>;
+    user?: Record<string, unknown>;
+  }) {
+    const cookie = await signLarkOauthCookie({ state, codeVerifier });
+    const store = memoryStore();
+    const fetch = scripted([
+      {
+        body: {
+          code: 0,
+          access_token: 'user-token-secret',
+          ...options.token,
+        },
+      },
+      {
+        body: {
+          code: 0,
+          data: {
+            open_id: 'ou_member1',
+            name: 'Rina',
+            email: 'rina@dupoin.co.id',
+            ...options.user,
+          },
+        },
+      },
+    ]);
+    const captured = await withWarnings(() => runLarkCallback({
+      config: { ...config, tenantKey: options.tenantKey ?? config.tenantKey },
+      oauthCookie: cookie,
+      error: null,
+      code: 'auth-code',
+      state,
+      store,
+      fetchImpl: fetch.fetchImpl,
+    }));
+    return { ...captured, store };
+  }
+
+  it('matches a trimmed user_info tenant to a trimmed env tenant', async () => {
+    const { result, warnings, store } = await callback({
+      tenantKey: '  tenant_test',
+      user: { tenant_key: 'tenant_test  ' },
+    });
+    assert.equal(result.location, 'https://bossnote.gorillaworkout.id/dashboard');
+    assert.equal(result.user?.role, 'member');
+    assert.equal(store.rows.some((row) => row.auth_provider === 'lark'), true);
+    assert.equal(warnings.some((args) => String(args[0]).includes('organization rejected')), false);
+    assert.equal(JSON.stringify(warnings).includes('tenant_test'), false);
+  });
+
+  it('rejects a different organization and logs lengths only', async () => {
+    const { result, warnings, store } = await callback({
+      token: { tenant_key: 'tenant_test' },
+      user: { tenant_key: 'other-tenant' },
+    });
+    assert.match(result.location, /lark_error=org$/);
+    assert.equal(result.user, null);
+    assert.equal(store.rows.some((row) => row.auth_provider === 'lark'), false);
+    assert.deepEqual(warnings, [[
+      '[lark-login] organization rejected',
+      lengths('ou_member1', 'tenant_test'.length, 'other-tenant'.length, 'tenant_test'.length),
+    ]]);
+    const logged = JSON.stringify(warnings);
+    assert.equal(logged.includes('other-tenant'), false);
+    assert.equal(logged.includes('tenant_test'), false);
+    assert.equal(logged.includes('user-token-secret'), false);
+  });
+
+  it('uses the oauth token tenant when user_info tenant is empty', async () => {
+    const { result, warnings, store } = await callback({
+      token: { tenant_key: '  tenant_test  ' },
+      user: { tenant_key: '' },
+    });
+    assert.equal(result.location, 'https://bossnote.gorillaworkout.id/dashboard');
+    assert.equal(result.user?.role, 'member');
+    assert.equal(store.rows.some((row) => row.auth_provider === 'lark'), true);
+    assert.equal(warnings.some((args) => String(args[0]).includes('organization rejected')), false);
+    assert.equal(JSON.stringify(warnings).includes('tenant_test'), false);
+  });
+
+  it('returns org and logs missing_tenant when both tenants are empty', async () => {
+    const { result, warnings, store } = await callback({
+      user: { tenant_key: '   ' },
+    });
+    assert.match(result.location, /lark_error=org$/);
+    assert.equal(result.user, null);
+    assert.equal(store.rows.some((row) => row.auth_provider === 'lark'), false);
+    assert.deepEqual(warnings, [[
+      '[lark-login] missing_tenant',
+      lengths('ou_member1', 'tenant_test'.length, 0, 0),
+    ]]);
+    assert.equal(JSON.stringify(warnings).includes('tenant_test'), false);
   });
 });
 
