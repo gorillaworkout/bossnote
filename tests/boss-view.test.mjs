@@ -86,6 +86,6 @@ describe('push delivery', () => {
   it('still leaves /api/ and navigations unhandled so bn_token is not dropped', () => {
     assert.match(sw, /pathname\.startsWith\('\/api\/'\)\) return/);
     assert.match(sw, /mode === 'navigate'\) return/);
-    assert.match(sw, /bossnote-v8/);
+    assert.match(sw, /bossnote-v9/);
   });
 });
