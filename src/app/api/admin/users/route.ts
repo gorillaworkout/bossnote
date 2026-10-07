@@ -9,7 +9,7 @@ import { validateCreateUser } from '@/lib/managed-user';
 import { requireAdmin } from '@/lib/require-admin';
 
 const USER_LIST_SQL = `SELECT u.id, u.email, u.name, u.role, u.department_id, d.name AS department_name,
-       u.lark_open_id, u.created_at
+       u.lark_open_id, u.lark_email, u.auth_provider, u.created_at
 FROM users u
 LEFT JOIN departments d ON d.id = u.department_id
 ORDER BY LOWER(u.name)`;
@@ -48,7 +48,8 @@ export async function POST(request: NextRequest) {
   const id = uuidv4();
   const hash = bcrypt.hashSync(parsed.password, 10);
   await execute(
-    'INSERT INTO users (id, email, name, password_hash, role, department_id) VALUES (?, ?, ?, ?, ?, ?)',
+    `INSERT INTO users (id, email, name, password_hash, role, department_id, auth_provider)
+     VALUES (?, ?, ?, ?, ?, ?, 'password')`,
     [id, email, parsed.name, hash, parsed.role, parsed.department_id],
   );
   await execute(

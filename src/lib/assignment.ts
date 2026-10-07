@@ -17,7 +17,11 @@ export const ASSIGNEE_NOT_ALLOWED_CODE = 'assignee_not_allowed';
 export const ASSIGNEE_NOT_ALLOWED_ERROR = 'That assignee is not allowed.';
 export const NO_ASSIGNEE_AVAILABLE_CODE = 'no_assignee_available';
 
-export function noAssigneeAvailableMessage(role: string): string {
+export const NO_DEPARTMENT_CREATE_ERROR =
+  'An admin must assign your department before you can create tasks.';
+
+export function noAssigneeAvailableMessage(role: string, departmentId?: string | null): string {
+  if (role === 'member' && departmentId === null) return NO_DEPARTMENT_CREATE_ERROR;
   if (role === 'member') return 'No boss in your department can take this task.';
   return 'No staff in your department to assign.';
 }
@@ -56,6 +60,7 @@ export function candidateListQuery(party: { role: string; department_id: string 
 
 export function decideCreateAssignee(input: {
   creatorRole: string;
+  creatorDepartmentId?: string | null;
   candidates: Party[];
   knownUserIds: string[];
   formAssigneeId: string;
@@ -67,7 +72,7 @@ export function decideCreateAssignee(input: {
       ok: false,
       status: 400,
       code: NO_ASSIGNEE_AVAILABLE_CODE,
-      error: noAssigneeAvailableMessage(input.creatorRole),
+      error: noAssigneeAvailableMessage(input.creatorRole, input.creatorDepartmentId),
     };
   }
   const formId = input.formAssigneeId.trim();

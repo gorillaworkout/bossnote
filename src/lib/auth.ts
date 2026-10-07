@@ -1,7 +1,9 @@
 import { cookies } from 'next/headers';
-import bcrypt from 'bcryptjs';
 import { queryOne } from '@/lib/database';
+import { passwordMatches } from '@/lib/password-match';
 import { COOKIE_NAME, toSessionUser, verifySessionToken, type SessionUser } from '@/lib/session';
+
+export { passwordMatches } from '@/lib/password-match';
 
 export type { SessionUser } from '@/lib/session';
 export {
@@ -57,7 +59,7 @@ export async function login(username: string, password: string): Promise<Session
   );
   if (!user) return null;
 
-  const valid = await bcrypt.compare(password, user.password_hash);
+  const valid = await passwordMatches(typeof password === 'string' ? password : '', user.password_hash);
   if (!valid) return null;
 
   return toSessionUser({

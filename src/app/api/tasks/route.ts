@@ -3,7 +3,13 @@ import { getSession } from '@/lib/auth';
 import { queryAll, queryOne, execute } from '@/lib/database';
 import { processVoiceNote, getUserModel, normalizeAudioModel } from '@/lib/ai';
 import { ASSIGNEE_REQUIRED_CODE } from '@/lib/assignee';
-import { candidateListQuery, decideCreateAssignee, type Party } from '@/lib/assignment';
+import {
+  candidateListQuery,
+  decideCreateAssignee,
+  NO_ASSIGNEE_AVAILABLE_CODE,
+  noAssigneeAvailableMessage,
+  type Party,
+} from '@/lib/assignment';
 import { buildTypedTaskFields } from '@/lib/typed-task';
 import {
   assessVoiceClarity,
@@ -185,6 +191,16 @@ async function createTaskForUser(
   input: CreateInput,
   commitClaim: (taskId: string) => void,
 ) {
+  if (user.role === 'member' && !user.department_id) {
+    return NextResponse.json(
+      {
+        error: noAssigneeAvailableMessage(user.role, null),
+        code: NO_ASSIGNEE_AVAILABLE_CODE,
+      },
+      { status: 400 },
+    );
+  }
+
   const listed = candidateListQuery({ role: user.role, department_id: user.department_id ?? null });
   const rows = listed
     ? await queryAll<Omit<Party, 'department_id'>>(listed.sql, listed.values)
@@ -211,6 +227,7 @@ async function createTaskForUser(
 
     const typedDecision = decideCreateAssignee({
       creatorRole: user.role,
+      creatorDepartmentId: user.department_id,
       candidates,
       knownUserIds: await knownAssigneeIds(input.formAssigneeId),
       formAssigneeId: input.formAssigneeId,
@@ -300,6 +317,7 @@ async function createTaskForUser(
 
   const decision = decideCreateAssignee({
     creatorRole: user.role,
+    creatorDepartmentId: user.department_id,
     candidates,
     knownUserIds: await knownAssigneeIds(input.formAssigneeId),
     formAssigneeId: input.formAssigneeId,

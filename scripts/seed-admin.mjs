@@ -64,14 +64,15 @@ try {
   const passwordHash = bcrypt.hashSync(process.env.ADMIN_PASSWORD, 10);
 
   await client.query(
-    `INSERT INTO users (id, email, name, password_hash, role, department_id)
-     VALUES ($1, $2, $3, $4, 'admin', NULL)
+    `INSERT INTO users (id, email, name, password_hash, role, department_id, auth_provider)
+     VALUES ($1, $2, $3, $4, 'admin', NULL, 'password')
      ON CONFLICT (id) DO UPDATE SET
        email = EXCLUDED.email,
        name = EXCLUDED.name,
        password_hash = EXCLUDED.password_hash,
        role = 'admin',
-       department_id = NULL`,
+       department_id = NULL,
+       auth_provider = 'password'`,
     [ADMIN_USER_ID, email, name, passwordHash],
   );
   await client.query(

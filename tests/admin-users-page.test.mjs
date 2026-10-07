@@ -13,6 +13,7 @@ describe('manage users page', () => {
   it('requires a department and limits the admin row', () => {
     for (const text of [
       'The admin creates each person, picks Boss or Staff, and places them in a department.',
+      'People who use Login with Lark appear here after their first sign-in, as Staff with no department.',
       'Create a department first.',
       'Their visible tasks and allowed assignees follow the new role and department immediately.',
       'department_id',
