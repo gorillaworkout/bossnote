@@ -3,12 +3,10 @@
 import { useEffect, useState } from 'react';
 import { DashboardHeader } from '@/components/DashboardHeader';
 
-interface User { id: string; name: string; role: string }
 interface Me { id: string; name: string; role: string }
 
 export default function AccountPage() {
   const [me, setMe] = useState<Me | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [current, setCurrent] = useState('');
@@ -17,8 +15,6 @@ export default function AccountPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const [targetId, setTargetId] = useState('');
-  const [targetPw, setTargetPw] = useState('');
   const [aiModel, setAiModel] = useState('ag/gemini-3.7-flash-high');
   const [modelOptions, setModelOptions] = useState<string[]>(['ag/gemini-3.7-flash-high']);
   const [modelBusy, setModelBusy] = useState(false);
@@ -28,7 +24,6 @@ export default function AccountPage() {
       if (!d.user) { window.location.href = '/'; return; }
       setMe(d.user);
     }).finally(() => setLoading(false));
-    fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users || []));
     fetch('/api/settings/model').then(r => r.json()).then(d => {
       const options: string[] = Array.isArray(d.options) && d.options.length ? d.options : ['ag/gemini-3.7-flash-high'];
       const model = d.model && options.includes(d.model) ? d.model : (options[0] || 'ag/gemini-3.7-flash-high');
@@ -64,8 +59,6 @@ export default function AccountPage() {
     }
   };
 
-  const isBoss = me?.role === 'boss';
-
   const changeOwn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (nextPw !== confirm) { setMsg({ ok: false, text: 'New passwords do not match.' }); return; }
@@ -84,25 +77,6 @@ export default function AccountPage() {
     finally { setBusy(false); }
   };
 
-  const resetUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!targetId) { setMsg({ ok: false, text: 'Choose a user.' }); return; }
-    if (targetPw.length < 6) { setMsg({ ok: false, text: 'New password must be at least 6 characters.' }); return; }
-    setBusy(true); setMsg(null);
-    try {
-      const r = await fetch('/api/auth/password', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: targetId, new_password: targetPw }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || 'Failed to reset password');
-      const name = users.find(u => u.id === targetId)?.name || targetId;
-      setMsg({ ok: true, text: `Password reset for ${name}.` });
-      setTargetPw('');
-    } catch (err) { setMsg({ ok: false, text: err instanceof Error ? err.message : 'Failed' }); }
-    finally { setBusy(false); }
-  };
-
   if (loading) return <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center"><p className="text-sm text-zinc-600 animate-pulse">Loading…</p></div>;
   if (!me) return null;
 
@@ -113,26 +87,28 @@ export default function AccountPage() {
       <main className="flex-1 max-w-[520px] w-full mx-auto p-5 space-y-5">
         <div>
           <h2 className="text-[15px] font-semibold text-zinc-100">Account</h2>
-          <p className="text-[12px] text-zinc-500 mt-0.5">{isBoss ? 'Update your password or reset a teammate password.' : 'Update your password.'}</p>
+          <p className="text-[12px] text-zinc-500 mt-0.5">Update your password.</p>
         </div>
         {msg && (
           <div className={`text-[12px] px-3 py-2 rounded-md border ${msg.ok ? 'bg-emerald-950/30 border-emerald-900/40 text-emerald-400' : 'bg-red-950/30 border-red-900/30 text-red-400'}`}>{msg.text}</div>
         )}
 
-        <section className="card p-5">
-          <h2 className="text-[12px] font-semibold text-zinc-200 mb-1">Voice model</h2>
-          <p className="text-[11px] text-zinc-400 mb-3">Used when you create a voice task. This stays off the board header.</p>
-          <label className="block text-[11px] font-medium text-zinc-400 uppercase tracking-wider mb-1.5" htmlFor="voice-model">Model</label>
-          <select
-            id="voice-model"
-            value={aiModel}
-            disabled={modelBusy}
-            onChange={(e) => { void saveModel(e.target.value); }}
-            className="input-field w-full px-3 py-2.5 text-[14px] cursor-pointer disabled:opacity-50"
-          >
-            {modelOptions.map((id) => <option key={id} value={id}>{audioModelLabel(id)}</option>)}
-          </select>
-        </section>
+        {me.role !== 'admin' && (
+          <section className="card p-5">
+            <h2 className="text-[12px] font-semibold text-zinc-200 mb-1">Voice model</h2>
+            <p className="text-[11px] text-zinc-400 mb-3">Used when you create a voice task. This stays off the board header.</p>
+            <label className="block text-[11px] font-medium text-zinc-400 uppercase tracking-wider mb-1.5" htmlFor="voice-model">Model</label>
+            <select
+              id="voice-model"
+              value={aiModel}
+              disabled={modelBusy}
+              onChange={(e) => { void saveModel(e.target.value); }}
+              className="input-field w-full px-3 py-2.5 text-[14px] cursor-pointer disabled:opacity-50"
+            >
+              {modelOptions.map((id) => <option key={id} value={id}>{audioModelLabel(id)}</option>)}
+            </select>
+          </section>
+        )}
 
         <section className="card p-5">
           <h2 className="text-[12px] font-semibold text-zinc-200 mb-1">Change your password</h2>
@@ -153,27 +129,6 @@ export default function AccountPage() {
             <button type="submit" disabled={busy} className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg text-[13px] transition-all shadow-[0_2px_8px_rgb(99_102_241/0.2)]">{busy ? 'Saving…' : 'Update password'}</button>
           </form>
         </section>
-
-        {isBoss && (
-          <section className="card p-5">
-            <h2 className="text-[12px] font-semibold text-zinc-200 mb-1">Reset a user&apos;s password</h2>
-            <p className="text-[11px] text-zinc-600 mb-4">Boss only — set a new password for any team member.</p>
-            <form onSubmit={resetUser} className="space-y-3">
-              <div>
-                <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">User</label>
-                <select value={targetId} onChange={e => setTargetId(e.target.value)} className="input-field w-full px-3 py-2.5 text-[14px] cursor-pointer">
-                  <option value="">Choose a user…</option>
-                  {users.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'boss' ? ' (boss)' : ' (staff)'}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">New password</label>
-                <input type="password" value={targetPw} onChange={e => setTargetPw(e.target.value)} required autoComplete="new-password" className="input-field w-full px-3.5 py-2.5 text-[14px]" />
-              </div>
-              <button type="submit" disabled={busy} className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium py-2.5 rounded-lg text-[13px] transition-colors disabled:opacity-50">{busy ? 'Saving…' : 'Reset password'}</button>
-            </form>
-          </section>
-        )}
       </main>
     </div>
   );
