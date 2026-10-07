@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth';
 import { queryAll, queryOne, execute } from '@/lib/database';
 import { processVoiceNote, getUserModel, normalizeAudioModel } from '@/lib/ai';
 import { resolveAssigneeFromHint } from '@/lib/assignee';
+import { candidateListQuery, isValidAssignmentPair, type Party } from '@/lib/assignment';
 import { readVoice } from '@/lib/voice-storage';
 import { publishTaskListChange } from '@/lib/task-live';
 import { canViewTask, type TaskParties } from '@/lib/task-access';
@@ -40,11 +41,28 @@ export async function POST(
     const model = normalizeAudioModel(await getUserModel(user.id));
     const ai = await processVoiceNote(buffer.toString('base64'), mime, model);
 
-    const team = await queryAll<{ id: string; name: string }>(
-      'SELECT id, name FROM users ORDER BY name',
-    );
-    const fromVoice = resolveAssigneeFromHint(ai.assignee_hint, team);
-    const assigneeId = fromVoice?.id || task.assignee_id;
+    const creator: Party = {
+      id: task.created_by,
+      name: '',
+      role: task.creator_role,
+      department_id: task.creator_department_id,
+    };
+    const listed = candidateListQuery({
+      role: creator.role,
+      department_id: creator.department_id,
+    });
+    const candidateRows = listed
+      ? await queryAll<Omit<Party, 'department_id'>>(listed.sql, listed.values)
+      : [];
+    const candidates: Party[] = candidateRows.map((row) => ({
+      ...row,
+      department_id: creator.department_id,
+    }));
+    const hinted = resolveAssigneeFromHint(ai.assignee_hint, candidates);
+    const hintedParty = hinted ? candidates.find((person) => person.id === hinted.id) : undefined;
+    const assigneeId = hintedParty && isValidAssignmentPair(creator, hintedParty)
+      ? hintedParty.id
+      : task.assignee_id;
 
     await execute(
       `UPDATE tasks SET title = ?, title_id = ?, description = ?,

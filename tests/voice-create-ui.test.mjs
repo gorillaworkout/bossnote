@@ -46,18 +46,20 @@ describe('voice create assignee UX', () => {
   });
 
   it('prefers form assignee on the voice create API path', () => {
-    assert.match(tasksRoute, /resolveCreateAssignee\(input\.formAssigneeId, ai\?\.assignee_hint, team\)/);
+    assert.match(tasksRoute, /decideCreateAssignee\(/);
+    assert.doesNotMatch(tasksRoute, /resolveCreateAssignee\(/);
+    assert.match(tasksRoute, /candidateListQuery/);
     assert.match(tasksRoute, /ASSIGNEE_REQUIRED_CODE/);
     assert.doesNotMatch(tasksRoute, /fromVoice\?\.id \|\| formUser\?\.id/);
   });
 
   it('passes stored Lark open ids and assignee email into fire-and-forget notify', () => {
-    assert.match(tasksRoute, /SELECT id, email, name, lark_open_id FROM users/);
     assert.match(tasksRoute, /assigneeOpenId: formUser\.lark_open_id/);
     assert.match(tasksRoute, /assigneeEmail: formUser\.email/);
     assert.match(tasksRoute, /assigneeOpenId: assignee\.lark_open_id/);
     assert.match(tasksRoute, /assigneeEmail: assignee\.email/);
-    assert.match(taskUpdateRoute, /SELECT id, email, name, lark_open_id FROM users WHERE id = \?/);
+    assert.match(taskUpdateRoute, /SELECT id, name, role, department_id, email, lark_open_id FROM users WHERE id = \?/);
+    assert.match(taskUpdateRoute, /decideReassign/);
     assert.match(taskUpdateRoute, /assigneeEmail: assignee\.email/);
     assert.match(taskUpdateRoute, /kind: 'reassign'/);
   });

@@ -3,7 +3,7 @@ import { getSession } from '@/lib/auth';
 import { queryOne, execute } from '@/lib/database';
 import { deleteTaskImage } from '@/lib/image-storage';
 import { assignmentPushUrl, canViewTask, type TaskParties } from '@/lib/task-access';
-import { canReassign } from '@/lib/assignment';
+import { decideReassign, type Party } from '@/lib/assignment';
 import { publishTaskListChange } from '@/lib/task-live';
 
 export async function GET(
@@ -82,14 +82,29 @@ export async function PUT(
   }
 
   if (nextAssigneeId && typeof nextAssigneeId === 'string') {
-    const view = canViewTask(user, task);
-    if (!canReassign(user, task, view)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-
-    const assignee = await queryOne<{ id: string; email: string; name: string; lark_open_id: string | null }>(
-      'SELECT id, email, name, lark_open_id FROM users WHERE id = ?',
+    const creator = await queryOne<Party>(
+      'SELECT id, name, role, department_id, email, lark_open_id FROM users WHERE id = ?',
+      [task.created_by],
+    );
+    const nextAssignee = await queryOne<Party>(
+      'SELECT id, name, role, department_id, email, lark_open_id FROM users WHERE id = ?',
       [nextAssigneeId],
     );
-    if (!assignee) return NextResponse.json({ error: 'Assignee not found' }, { status: 400 });
+    const view = canViewTask(user, task);
+    const decision = decideReassign({
+      viewer: user,
+      creator: creator ?? { id: '', name: '', role: '', department_id: null },
+      nextAssignee: nextAssignee ?? null,
+      task,
+      canView: view,
+    });
+    if (!decision.ok) {
+      return NextResponse.json(
+        { error: decision.error, code: decision.code },
+        { status: decision.status },
+      );
+    }
+    const assignee = nextAssignee!;
 
     await execute(
       'UPDATE tasks SET assignee_id = ?, updated_at = NOW() WHERE id = ?',

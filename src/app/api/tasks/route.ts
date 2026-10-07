@@ -2,11 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { queryAll, queryOne, execute } from '@/lib/database';
 import { processVoiceNote, getUserModel, normalizeAudioModel } from '@/lib/ai';
-import {
-  ASSIGNEE_REQUIRED_CODE,
-  ASSIGNEE_REQUIRED_ERROR,
-  resolveCreateAssignee,
-} from '@/lib/assignee';
+import { ASSIGNEE_REQUIRED_CODE } from '@/lib/assignee';
+import { candidateListQuery, decideCreateAssignee, type Party } from '@/lib/assignment';
 import { buildTypedTaskFields } from '@/lib/typed-task';
 import {
   assessVoiceClarity,
@@ -167,20 +164,35 @@ export async function POST(request: NextRequest) {
   };
 
   try {
-    return await createTaskForUser(user, input, commitClaim);
+    return await createTaskForUser(
+      { id: user.id, name: user.name, role: user.role, department_id: user.department_id },
+      input,
+      commitClaim,
+    );
   } finally {
     releaseClaim();
   }
 }
 
+async function knownAssigneeIds(formAssigneeId: string): Promise<string[]> {
+  if (!formAssigneeId) return [];
+  const rows = await queryAll<{ id: string }>('SELECT id FROM users WHERE id = ?', [formAssigneeId]);
+  return rows.map((row) => row.id);
+}
+
 async function createTaskForUser(
-  user: { id: string; name: string },
+  user: { id: string; name: string; role: string; department_id: string | null },
   input: CreateInput,
   commitClaim: (taskId: string) => void,
 ) {
-  const team = await queryAll<{ id: string; email: string; name: string; lark_open_id: string | null }>(
-    'SELECT id, email, name, lark_open_id FROM users ORDER BY name',
-  );
+  const listed = candidateListQuery({ role: user.role, department_id: user.department_id ?? null });
+  const rows = listed
+    ? await queryAll<Omit<Party, 'department_id'>>(listed.sql, listed.values)
+    : [];
+  const candidates: Party[] = rows.map((row) => ({
+    ...row,
+    department_id: user.department_id,
+  }));
 
   // Typed path: no voice, no LLM. Works even when Gemini is down.
   if (!input.voiceFile) {
@@ -197,12 +209,21 @@ async function createTaskForUser(
       );
     }
 
-    const formUser = input.formAssigneeId
-      ? team.find((u) => u.id === input.formAssigneeId)
-      : undefined;
-    if (!formUser) {
-      return NextResponse.json({ error: 'Assignee is required' }, { status: 400 });
+    const typedDecision = decideCreateAssignee({
+      creatorRole: user.role,
+      candidates,
+      knownUserIds: await knownAssigneeIds(input.formAssigneeId),
+      formAssigneeId: input.formAssigneeId,
+      hint: null,
+      typed: true,
+    });
+    if (!typedDecision.ok) {
+      return NextResponse.json(
+        { error: typedDecision.error, code: typedDecision.code },
+        { status: typedDecision.status },
+      );
     }
+    const formUser = typedDecision.user;
 
     const taskId = uuidv4();
     await execute(
@@ -277,14 +298,24 @@ async function createTaskForUser(
     return NextResponse.json(voiceUnclearPayload(clarity, aiError), { status: 400 });
   }
 
-  const assignee = resolveCreateAssignee(input.formAssigneeId, ai?.assignee_hint, team);
-
-  if (!assignee) {
+  const decision = decideCreateAssignee({
+    creatorRole: user.role,
+    candidates,
+    knownUserIds: await knownAssigneeIds(input.formAssigneeId),
+    formAssigneeId: input.formAssigneeId,
+    hint: ai?.assignee_hint ?? null,
+    typed: false,
+  });
+  if (!decision.ok) {
     return NextResponse.json(
-      { error: ASSIGNEE_REQUIRED_ERROR, code: ASSIGNEE_REQUIRED_CODE },
-      { status: 400 },
+      {
+        error: decision.error,
+        code: decision.code === ASSIGNEE_REQUIRED_CODE ? ASSIGNEE_REQUIRED_CODE : decision.code,
+      },
+      { status: decision.status },
     );
   }
+  const assignee = decision.user;
   const assigneeId = assignee.id;
 
   let voicePath: string;
