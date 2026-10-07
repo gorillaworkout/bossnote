@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { pushBannerMode } from './push-ux.ts';
+import { pushBannerDismissKey, pushBannerMode, pushDeniedCopy, shouldShowPushBanner } from './push-ux.ts';
 import { uniqueSubscriptions } from './push-targets.ts';
 
 describe('pushBannerMode', () => {
@@ -41,6 +41,28 @@ describe('pushBannerMode', () => {
       hasPushManager: false,
       permission: 'default',
     }), 'unsupported');
+  });
+});
+
+describe('push banner copy and dismiss', () => {
+  it('uses browser steps on desktop and Android, and iPhone steps only on iOS', () => {
+    assert.match(pushDeniedCopy('desktop'), /address bar/i);
+    assert.doesNotMatch(pushDeniedCopy('desktop'), /iPhone/);
+    assert.match(pushDeniedCopy('android'), /browser/i);
+    assert.doesNotMatch(pushDeniedCopy('android'), /iPhone/);
+    assert.match(pushDeniedCopy('ios'), /iPhone/);
+  });
+
+  it('keeps a dismissed banner hidden until push is actually granted', () => {
+    assert.equal(shouldShowPushBanner('denied', true), false);
+    assert.equal(shouldShowPushBanner('enable', true), false);
+    assert.equal(shouldShowPushBanner('ios-install', true), false);
+    assert.equal(shouldShowPushBanner('denied', false), true);
+    assert.equal(shouldShowPushBanner('granted', false), false);
+    assert.equal(shouldShowPushBanner('unsupported', false), false);
+    assert.equal(pushBannerDismissKey('denied'), 'bn_push_banner_dismissed');
+    assert.equal(pushBannerDismissKey('ios-install'), 'bn_push_ios_dismissed');
+    assert.equal(pushBannerDismissKey('granted'), null);
   });
 });
 

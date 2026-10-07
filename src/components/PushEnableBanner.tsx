@@ -1,7 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { pushBannerMode, type PushBannerMode, type PushPermission } from '@/lib/push-ux';
+import {
+  pushBannerDismissKey,
+  pushBannerMode,
+  pushDeniedCopy,
+  shouldShowPushBanner,
+  type PushBannerMode,
+  type PushPermission,
+  type PushPlatform,
+} from '@/lib/push-ux';
 
 function urlBase64ToUint8Array(base64: string): Uint8Array {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4);
@@ -13,10 +21,18 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
 
 type Phase = 'hidden' | PushBannerMode | 'ready';
 
-function detectIos(): boolean {
+function detectPlatform(): PushPlatform {
   const ua = navigator.userAgent || '';
-  if (/iPad|iPhone|iPod/.test(ua)) return true;
-  return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+  if (/iPad|iPhone|iPod/.test(ua)) return 'ios';
+  if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return 'ios';
+  if (/Android/i.test(ua)) return 'android';
+  return 'desktop';
+}
+
+function bannerDismissed(mode: PushBannerMode): boolean {
+  const key = pushBannerDismissKey(mode);
+  if (!key) return false;
+  try { return localStorage.getItem(key) === '1'; } catch { return false; }
 }
 
 function detectStandalone(): boolean {
@@ -29,7 +45,7 @@ function currentMode(): PushBannerMode {
     ? (Notification.permission as PushPermission)
     : 'unknown';
   return pushBannerMode({
-    ios: detectIos(),
+    ios: detectPlatform() === 'ios',
     standalone: detectStandalone(),
     hasServiceWorker: 'serviceWorker' in navigator,
     hasPushManager: 'PushManager' in window,
@@ -75,6 +91,7 @@ async function subscribeAndSave(): Promise<{ ok: boolean; error?: string }> {
 
 export function PushEnableBanner() {
   const [phase, setPhase] = useState<Phase>('hidden');
+  const [platform, setPlatform] = useState<PushPlatform>('desktop');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [testNote, setTestNote] = useState<string | null>(null);
@@ -84,17 +101,18 @@ export function PushEnableBanner() {
     const timer = window.setTimeout(() => {
       if (cancelled) return;
       const mode = currentMode();
+      setPlatform(detectPlatform());
       if (mode === 'unsupported') return;
       if (mode === 'granted') {
         void subscribeAndSave().then((result) => {
           if (cancelled || result.ok) return;
+          if (bannerDismissed('enable')) return;
           setError(result.error || 'This device is not registered yet.');
           setPhase('enable');
         });
         return;
       }
-      const dismissKey = mode === 'ios-install' ? 'bn_push_ios_dismissed' : 'bn_push_banner_dismissed';
-      if (localStorage.getItem(dismissKey) === '1') return;
+      if (!shouldShowPushBanner(mode, bannerDismissed(mode))) return;
       setPhase(mode);
     }, 0);
     return () => {
@@ -145,8 +163,10 @@ export function PushEnableBanner() {
   };
 
   const dismiss = () => {
-    const key = phase === 'ios-install' ? 'bn_push_ios_dismissed' : 'bn_push_banner_dismissed';
-    localStorage.setItem(key, '1');
+    const key = pushBannerDismissKey(phase === 'ios-install' ? 'ios-install' : 'denied');
+    if (key) {
+      try { localStorage.setItem(key, '1'); } catch { /* private mode */ }
+    }
     setPhase('hidden');
   };
 
@@ -167,7 +187,7 @@ export function PushEnableBanner() {
       )}
       {phase === 'denied' && (
         <p className="leading-relaxed text-indigo-100">
-          Notifications are blocked. On iPhone open Settings → Notifications → BossNote and allow them, then reopen this app and tap Enable Push.
+          {pushDeniedCopy(platform)}
         </p>
       )}
       {phase === 'ready' && (

@@ -1,3 +1,5 @@
+import { dedupeTasksById } from './task-board.ts';
+
 export const TASK_EVENTS_PATH = '/api/tasks/events';
 export const TASK_EVENTS_RETRY_MS = 3000;
 
@@ -27,10 +29,11 @@ export function mergeLiveTaskList<T extends { id: string; status: string }>(
   previous: T[],
   pendingId: string | null,
 ): T[] {
-  if (!pendingId) return incoming;
+  const unique = dedupeTasksById(incoming);
+  if (!pendingId) return unique;
   const optimistic = previous.find((task) => task.id === pendingId);
-  if (!optimistic) return incoming;
-  return incoming.map((task) => (
+  if (!optimistic) return unique;
+  return unique.map((task) => (
     task.id === pendingId ? { ...task, status: optimistic.status } : task
   ));
 }

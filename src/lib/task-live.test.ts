@@ -141,4 +141,14 @@ describe('live list refresh helpers', () => {
     assert.equal(merged.find((task) => task.id === 'c')?.title, 'Assigned just now');
     assert.deepEqual(mergeLiveTaskList(incoming, previous, null), incoming);
   });
+
+  it('collapses the same task id if a refetch returns it twice', () => {
+    const incoming = [
+      { id: 'a', status: 'todo', title: 'Create FM asset request' },
+      { id: 'a', status: 'todo', title: 'Create FM asset request' },
+    ];
+    const merged = mergeLiveTaskList(incoming, [], null);
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0]?.id, 'a');
+  });
 });

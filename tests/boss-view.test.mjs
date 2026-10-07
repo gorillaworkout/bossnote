@@ -28,7 +28,8 @@ describe('boss assigned-to-me board', () => {
 
   it('offers Assigned, Created by me, and All without leaking other members tasks', () => {
     assert.match(dashboard, /role="tablist"/);
-    assert.match(dashboard, /grid grid-cols-3/);
+    assert.match(dashboard, /h-7 px-2 text-\[11px\]/);
+    assert.doesNotMatch(dashboard, /grid grid-cols-3/);
     assert.match(dashboard, /aria-label="Tasks"/);
     assert.match(dashboard, /taskListScopeLabel/);
     assert.match(dashboard, /emptyTaskScopeMessage/);

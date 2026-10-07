@@ -12,6 +12,10 @@ describe('task statuses', () => {
       TASK_STATUSES.map((status) => status.label),
       ['To Do', 'In Progress', 'Stuck', 'Done'],
     );
+    assert.deepEqual(
+      TASK_STATUSES.map((status) => status.shortLabel),
+      ['To Do', 'In Progress', 'Stuck', 'Done'],
+    );
     assert.equal(isTaskStatus('waiting'), true);
     assert.equal(isTaskStatus('blocked'), false);
   });

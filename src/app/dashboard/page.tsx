@@ -4,7 +4,8 @@ import { useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { PushEnableBanner } from '@/components/PushEnableBanner';
 import { VoicePlayer } from '@/components/VoicePlayer';
-import { taskTitles } from '@/lib/task-title';
+import { distinctSummary, priorityLabel, taskTitles } from '@/lib/task-title';
+import { boardColumns, taskHiddenByFilters, taskShareHref } from '@/lib/task-board';
 import { assigneeOptionLabel, isAssigneeRequiredError } from '@/lib/assignee';
 import {
   emptyTaskScopeMessage,
@@ -173,7 +174,7 @@ function AssigneePickModal({
             {renderGroup('Boss', bosses)}
           </>
         )}
-        <button type="button" onClick={onBack} disabled={busy} className="w-full mt-2 text-[12px] text-zinc-600 hover:text-zinc-400 py-1.5 disabled:opacity-40">
+        <button type="button" onClick={onBack} disabled={busy} className="w-full mt-2 text-[12px] text-zinc-300 hover:text-zinc-100 py-1.5 disabled:opacity-40">
           Back
         </button>
       </div>
@@ -249,7 +250,7 @@ function VoiceUnclearModal({
             </button>
           )}
         </div>
-        <button type="button" onClick={onBack} disabled={busy} className="w-full mt-2 text-[12px] text-zinc-600 hover:text-zinc-400 py-1.5 disabled:opacity-40">
+        <button type="button" onClick={onBack} disabled={busy} className="w-full mt-2 text-[12px] text-zinc-300 hover:text-zinc-100 py-1.5 disabled:opacity-40">
           Back
         </button>
       </div>
@@ -273,7 +274,6 @@ export default function DashboardPage() {
   const [needsConfirmationOnly, setNeedsConfirmationOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [aiModel, setAiModel] = useState('ag/gemini-3.7-flash-high');
-  const [modelOptions, setModelOptions] = useState<string[]>(['ag/gemini-3.7-flash-high']);
   const [processing, setProcessing] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -308,10 +308,25 @@ export default function DashboardPage() {
   const [answering, setAnswering] = useState<{ idx: number; blob: Blob | null; recording: boolean }>({ idx: -1, blob: null, recording: false });
   const questionRecorderRef = useRef<MediaRecorder | null>(null);
   const createInFlightRef = useRef(false);
+  const [mobileDetail, setMobileDetail] = useState(false);
+  const createTokenRef = useRef('');
+  const nextCreateToken = () => {
+    const raw = globalThis.crypto?.randomUUID?.() || `bn${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+    const token = raw.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
+    createTokenRef.current = token.length >= 8 ? token : `bn${Date.now().toString(36)}token`;
+  };
+  const closeTask = useCallback(() => {
+    setSelectedTask(null);
+    setMobileDetail(false);
+    openedTaskRef.current = null;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('task')) return;
+    url.searchParams.delete('task');
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
   const [confirmDelete, setConfirmDelete] = useState<Task | null>(null);
   const [kanbanTab, setKanbanTab] = useState<TaskStatus>('todo');
   const [statusPendingId, setStatusPendingId] = useState<string | null>(null);
-  const [mobileDetail, setMobileDetail] = useState(false);
 
   /* ── Data fetching ── */
 
@@ -329,7 +344,6 @@ export default function DashboardPage() {
     const params = new URLSearchParams();
     params.set('scope', taskScope);
     if (filterAssignee && taskScope === 'all') params.set('assignee', filterAssignee);
-    if (filterStatus) params.set('status', filterStatus);
     if (searchQuery.trim()) params.set('search', searchQuery.trim());
     const res = await fetch(`/api/tasks?${params}`, { cache: 'no-store' });
     if (!res.ok) return;
@@ -348,7 +362,7 @@ export default function DashboardPage() {
       if (pendingId === openId) next.status = prev.status;
       return next;
     });
-  }, [filterAssignee, filterStatus, searchQuery, taskScope]);
+  }, [filterAssignee, searchQuery, taskScope]);
 
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' }).then(r => r.json()).then(d => {
@@ -362,7 +376,6 @@ export default function DashboardPage() {
       fetch('/api/settings/model').then(r => r.json()).then(d => {
         const options: string[] = Array.isArray(d.options) && d.options.length ? d.options : ['ag/gemini-3.7-flash-high'];
         const model = d.model && options.includes(d.model) ? d.model : (options[0] || 'ag/gemini-3.7-flash-high');
-        setModelOptions(options);
         setAiModel(model);
       });
     }).finally(() => setLoading(false));
@@ -452,6 +465,7 @@ export default function DashboardPage() {
     };
   };
   const openNewTask = () => {
+    nextCreateToken();
     setShowNewTask(true);
     setAudioBlob(null);
     setAudioUrl(null);
@@ -476,13 +490,14 @@ export default function DashboardPage() {
     clearImageDraft();
     if (data.ai_error) setError('Task saved, but transcription failed.');
     else if (data.task?.assignee_name) setNotice(`Assigned to ${data.task.assignee_name}.`);
+    nextCreateToken();
     await fetchTasks();
     const canOpen = data.task?.id && (
       currentUser.role === 'boss' ||
       data.task.assignee_id === currentUser.id ||
       data.task.created_by === currentUser.id
     );
-    if (canOpen && data.task?.id) await loadTaskDetail(data.task.id);
+    if (canOpen && data.task?.id) await loadTaskDetail(data.task.id, 'push');
   };
   const beginCreate = () => {
     if (createInFlightRef.current) return false;
@@ -532,8 +547,14 @@ export default function DashboardPage() {
       form.append('voice_duration', String(recordingTime));
       form.append('model', aiModel);
       if (keepDraft) form.append('confirm_unclear', '1');
+      if (createTokenRef.current) form.append('client_token', createTokenRef.current);
       const res = await fetch('/api/tasks', { method: 'POST', body: form });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        await fetchTasks();
+        setNotice('That task is already being created.');
+        return;
+      }
       if (!res.ok) {
         if (isVoiceUnclearError(data)) {
           setVoiceUnclear({
@@ -570,8 +591,14 @@ export default function DashboardPage() {
       form.append('assignee_id', assigneeId);
       form.append('priority', typedPriority);
       if (typedDeadline) form.append('deadline', typedDeadline);
+      if (createTokenRef.current) form.append('client_token', createTokenRef.current);
       const res = await fetch('/api/tasks', { method: 'POST', body: form });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        await fetchTasks();
+        setNotice('That task is already being created.');
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Failed to create reminder');
       const imageErr = await attachImageIfAny(data.task as Task | undefined);
       if (user) await finishCreate(data, user);
@@ -584,7 +611,7 @@ export default function DashboardPage() {
 
   /* ── Task actions ── */
 
-  const loadTaskDetail = useCallback(async (id: string) => {
+  const loadTaskDetail = useCallback(async (id: string, history: 'push' | 'replace' | 'none' = 'none') => {
     setDetailImageError(null);
     const r = await fetch(`/api/tasks/${id}`);
     const d = await r.json().catch(() => ({}));
@@ -595,6 +622,14 @@ export default function DashboardPage() {
     setSelectedTask(d.task);
     setReplies(d.replies || []);
     setMobileDetail(true);
+    openedTaskRef.current = id;
+    if (history === 'none') return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('task', id);
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (next === current) return;
+    window.history[history === 'push' ? 'pushState' : 'replaceState'](null, '', next);
   }, []);
   useEffect(() => {
     if (!user) return;
@@ -603,6 +638,22 @@ export default function DashboardPage() {
     openedTaskRef.current = taskId;
     void loadTaskDetail(taskId);
   }, [user, loadTaskDetail]);
+  useEffect(() => {
+    const onPop = () => {
+      const taskId = new URLSearchParams(window.location.search).get('task');
+      if (!taskId) {
+        setSelectedTask(null);
+        setMobileDetail(false);
+        openedTaskRef.current = null;
+        return;
+      }
+      if (openedTaskRef.current === taskId) return;
+      openedTaskRef.current = taskId;
+      void loadTaskDetail(taskId);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [loadTaskDetail]);
   const addTaskImages = async (taskId: string, files: File[]) => {
     if (!files.length) return;
     setDetailImageBusy(true);
@@ -691,11 +742,10 @@ export default function DashboardPage() {
       setSelectedTask((prev) => prev ? { ...prev, assignee_id: nextAssigneeId, assignee_name: assignee?.name || prev.assignee_name } : null);
     }
     if (user?.role === 'member' && nextAssigneeId !== user.id && selectedTask?.id === id) {
-      setSelectedTask(null);
-      setMobileDetail(false);
+      closeTask();
     }
   };
-  const deleteTask = async (id: string) => { await fetch(`/api/tasks/${id}`, { method: 'DELETE' }); if (selectedTask?.id === id) setSelectedTask(null); setConfirmDelete(null); fetchTasks(); };
+  const deleteTask = async (id: string) => { await fetch(`/api/tasks/${id}`, { method: 'DELETE' }); if (selectedTask?.id === id) closeTask(); setConfirmDelete(null); fetchTasks(); };
   const retranscribe = async (id: string) => { setRetrying(true); setError(null);
     try { const r = await fetch(`/api/tasks/${id}/retranscribe`, { method: 'POST' }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'Retranscription failed'); setSelectedTask(d.task); await fetchTasks(); } catch (e) { setError((e as Error).message); } finally { setRetrying(false); }
   };
@@ -717,32 +767,29 @@ export default function DashboardPage() {
 
   /* ── Helpers ── */
 
-  const audioModelLabel = (id: string) => ({
-    'ag/gemini-3.7-flash-high': 'Gemini 3.7 Flash',
-    'ag/gemini-3-flash': 'Gemini 3 Flash',
-    'ag/gemini-3.6-flash-medium': 'Gemini 3.6 Flash',
-    'ag/gemini-3-flash-agent': 'Gemini 3 Flash Agent',
-  } as Record<string, string>)[id] || id.replace(/^ag\//, '');
   const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : null;
-  const dlStatus = (d: string | null): string | null => { if (!d) return null; const now = Date.now(), dl = new Date(d).getTime(), today = new Date().setHours(0,0,0,0); if (dl < today) return 'overdue'; if (dl < today + 86400000) return 'today'; if (dl < today + 2*86400000) return 'tomorrow'; return null; };
+  const dlStatus = (d: string | null): string | null => { if (!d) return null; const dl = new Date(d).getTime(), today = new Date().setHours(0,0,0,0); if (dl < today) return 'overdue'; if (dl < today + 86400000) return 'today'; if (dl < today + 2*86400000) return 'tomorrow'; return null; };
   const dlClass = (d: string | null) => ({ overdue: 'text-red-400', today: 'text-amber-300', tomorrow: 'text-amber-400/70' } as Record<string,string>)[dlStatus(d) || ''] || 'text-zinc-500';
 
   const pendingTasks = tasks.filter(needsConfirmation);
   const pendingCount = pendingTasks.length;
-  const boardTasks = needsConfirmationOnly ? pendingTasks : tasks;
+  const pool = needsConfirmationOnly ? pendingTasks : tasks;
+  const boardTasks = filterStatus ? pool.filter((task) => task.status === filterStatus) : pool;
+  const columns = boardColumns(filterStatus);
   const waitingCount = tasks.filter(t => t.status === 'waiting').length;
   const showNeedsConfirmation = () => {
     const action = confirmationAction(tasks);
     if (action.kind === 'open') {
       setNeedsConfirmationOnly(false);
-      void loadTaskDetail(action.id);
+      setFilterStatus('');
+      void loadTaskDetail(action.id, 'push');
       return;
     }
     if (action.kind === 'filter') {
+      setFilterStatus('');
       setNeedsConfirmationOnly(true);
-      setSelectedTask(null);
-      setMobileDetail(false);
+      closeTask();
     }
   };
   const scopeEmptyMessage = emptyTaskScopeMessage(taskScope ?? (user?.role === 'boss' ? 'assigned' : 'created'));
@@ -755,12 +802,21 @@ export default function DashboardPage() {
     const ds = dlStatus(task.deadline);
     const pendingQCount = unansweredCount(task);
     const shots = taskImageSources(task);
+    const heading = taskTitles(task, user.role).primary;
     return (
-      <div key={task.id} onClick={() => loadTaskDetail(task.id)}
-        className={`group card p-3 cursor-pointer transition-all hover:border-zinc-600 hover:bg-[var(--surface-raised)] active:scale-[0.98] ${selectedTask?.id === task.id ? 'ring-1 ring-violet-500/50 border-violet-500/40' : ''}`}>
+      <div key={task.id}
+        className={`group card relative p-2.5 transition-all hover:border-zinc-600 hover:bg-[var(--surface-raised)] ${selectedTask?.id === task.id ? 'ring-1 ring-violet-500/50 border-violet-500/40' : ''}`}>
+        <a href={taskShareHref(taskScope, task.id)}
+          aria-label={heading}
+          onClick={(event) => {
+            if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+            event.preventDefault();
+            void loadTaskDetail(task.id, 'push');
+          }}
+          className="absolute inset-0 z-0 rounded-[inherit]" />
         {shots.length > 0 && (
-          <div className="relative mb-2">
-            <img src={shots[0]} alt="Screenshot" className="w-full h-36 object-contain rounded-md bg-zinc-950 border border-zinc-800" />
+          <div className="relative z-10 mb-1.5 pointer-events-none">
+            <img src={shots[0]} alt="Screenshot" className="w-full h-20 object-cover rounded-md bg-zinc-950 border border-zinc-800" />
             {shots.length > 1 && (
               <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded-md bg-black/75 text-[10px] font-medium text-zinc-100">
                 {shots.length} photos
@@ -768,11 +824,11 @@ export default function DashboardPage() {
             )}
           </div>
         )}
-        <div className="flex items-start gap-2">
-          <PriorityDot level={task.priority} />
+        <div className="relative z-10 flex items-start gap-2 pointer-events-none">
+          <span className="pointer-events-none"><PriorityDot level={task.priority} /></span>
           <div className="min-w-0 flex-1">
-            <p className="text-[12px] leading-snug text-zinc-200 line-clamp-2 font-medium">{taskTitles(task, user.role).primary}</p>
-            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <p className="pointer-events-none text-[12px] leading-snug text-zinc-200 line-clamp-2 font-medium">{heading}</p>
+            <div className="pointer-events-none flex items-center gap-2 mt-1.5 flex-wrap">
               {task.assignee_name && (
                 <span className="text-[10px] text-zinc-400 bg-zinc-800/70 border border-zinc-700/50 px-1.5 py-0.5 rounded-md font-medium">@{task.assignee_name}</span>
               )}
@@ -781,11 +837,11 @@ export default function DashboardPage() {
                   {ds === 'overdue' ? 'Overdue' : ds === 'today' ? 'Today' : ds === 'tomorrow' ? 'Tomorrow' : fmtDate(task.deadline)}
                 </span>
               )}
-              {task.reply_count > 0 && <span className="text-[10px] text-zinc-600">{task.reply_count} 💬</span>}
+              {task.reply_count > 0 && <span className="text-[10px] text-zinc-500">{task.reply_count} 💬</span>}
               {pendingQCount > 0 && <span className="text-[10px] text-amber-500 font-medium">{pendingQCount} ⚡</span>}
               {task.ai_error && <AlertIcon />}
             </div>
-            <div className="mt-2">
+            <div className="pointer-events-auto mt-1.5">
               <StatusButtons
                 size="compact"
                 value={task.status}
@@ -794,8 +850,8 @@ export default function DashboardPage() {
               />
             </div>
           </div>
-          <button onClick={e => { e.stopPropagation(); setConfirmDelete(task); }}
-            className="sm:opacity-0 sm:group-hover:opacity-100 text-zinc-500 hover:text-red-400 p-0.5 transition-all flex-shrink-0" title="Delete"><TrashIcon/></button>
+          <button type="button" onClick={e => { e.preventDefault(); e.stopPropagation(); setConfirmDelete(task); }}
+            className="pointer-events-auto sm:opacity-0 sm:group-hover:opacity-100 text-zinc-400 hover:text-red-400 p-0.5 transition-all flex-shrink-0" title="Delete"><TrashIcon/></button>
         </div>
       </div>
     );
@@ -819,7 +875,7 @@ export default function DashboardPage() {
             <AssigneeSelect users={users} value={t.assignee_id} onChange={(id) => { void reassignTask(t.id, id); }} />
           </div>
         </div>
-        <button onClick={() => setConfirmDelete(t)} className="p-1.5 text-zinc-700 hover:text-red-400 hover:bg-red-950/30 rounded-md transition-colors flex-shrink-0" title="Delete"><TrashIcon/></button>
+        <button onClick={() => setConfirmDelete(t)} className="inline-flex items-center gap-1 px-2 py-1 text-[12px] font-medium text-zinc-300 hover:text-red-300 hover:bg-red-950/40 border border-zinc-700 rounded-md transition-colors flex-shrink-0" title="Delete task"><TrashIcon/> Delete</button>
       </div>
       <div className="mb-5">
         <StatusButtons
@@ -839,7 +895,7 @@ export default function DashboardPage() {
       />
 
       <div className="flex items-center gap-2 mb-5">
-        <span className={`px-2 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wider ${t.priority === 'high' ? 'bg-red-950/60 text-red-400' : t.priority === 'medium' ? 'bg-amber-950/50 text-amber-400' : 'bg-zinc-800 text-zinc-500'}`}>{t.priority}</span>
+        <span className={`px-2 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wider ${t.priority === 'high' ? 'bg-red-950/60 text-red-400' : t.priority === 'medium' ? 'bg-amber-950/50 text-amber-400' : 'bg-zinc-800 text-zinc-300'}`}>Priority · {priorityLabel(t.priority)}</span>
       </div>
 
       {/* ── AI Error ── */}
@@ -866,17 +922,21 @@ export default function DashboardPage() {
               </div>
             )}
           </>
-        ) : <p className="text-[13px] text-zinc-700 italic">No transcript</p>}
+        ) : <p className="text-[13px] text-zinc-400">No transcript</p>}
       </section>
 
-      {/* ── Summary ── */}
-      {(t.summary || t.summary_id) && (
+      {/* ── Summary. Hidden when it repeats the reminder text. ── */}
+      {(() => {
+        const summary = distinctSummary(t);
+        if (!summary.en && !summary.id) return null;
+        return (
         <section className="card p-4 mb-4 bg-violet-950/20 border-violet-800/30">
           <h3 className="text-[10px] font-semibold text-violet-400 uppercase tracking-[0.12em] mb-2">What the Boss Means</h3>
-          {t.summary && <p className="text-[13px] text-zinc-200 leading-relaxed whitespace-pre-wrap">{t.summary}</p>}
-          {t.summary_id && t.summary_id !== t.summary && <p className="text-[12px] text-zinc-500 leading-relaxed mt-2 pt-2 border-t border-violet-800/20">{t.summary_id}</p>}
+          {summary.en && <p className="text-[13px] text-zinc-200 leading-relaxed whitespace-pre-wrap">{summary.en}</p>}
+          {summary.id && <p className="text-[12px] text-zinc-400 leading-relaxed mt-2 pt-2 border-t border-violet-800/20">{summary.id}</p>}
         </section>
-      )}
+        );
+      })()}
 
       {/* ── Steps ── */}
       {t.steps?.length > 0 && (
@@ -924,7 +984,7 @@ export default function DashboardPage() {
                       ) : isAnsweringThis && answering.blob ? (
                         <div className="flex items-center gap-1">
                           <button onClick={sendAnswer} className="bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] px-2.5 py-1 rounded-md font-medium">Send</button>
-                          <button onClick={() => setAnswering({ idx: -1, blob: null, recording: false })} className="text-[11px] text-zinc-500 hover:text-zinc-300">Cancel</button>
+                          <button onClick={() => setAnswering({ idx: -1, blob: null, recording: false })} className="text-[11px] text-zinc-300 hover:text-zinc-100">Cancel</button>
                         </div>
                       ) : (
                         <button onClick={() => startAnswerRecording(idx)} className="inline-flex items-center gap-1 bg-amber-950/60 hover:bg-amber-900/50 border border-amber-800/40 text-amber-400 text-[11px] px-2 py-1 rounded-md font-medium transition-colors"><MicIcon/> Answer</button>
@@ -955,13 +1015,13 @@ export default function DashboardPage() {
       {/* ── Reply bar ── */}
       <div className="mt-5 pt-4 border-t border-[var(--border)] flex items-center gap-2 flex-wrap">
         {!replyRecording && !replyBlob && (
-          <button onClick={startReplyRecording} className="inline-flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[12px] font-medium px-3 py-1.5 rounded-md transition-colors"><MicIcon/> Reply</button>
+          <button onClick={startReplyRecording} className="inline-flex items-center gap-1.5 bg-violet-600 hover:bg-violet-500 text-white text-[12px] font-medium px-3 py-1.5 rounded-md transition-colors"><MicIcon/> Reply</button>
         )}
         {replyRecording && <button onClick={stopReplyRecording} className="bg-red-600 hover:bg-red-500 text-white text-[12px] font-medium px-3 py-1.5 rounded-md animate-pulse">Stop</button>}
         {replyBlob && (
           <div className="flex items-center gap-2">
             <button onClick={sendReply} className="bg-emerald-700 hover:bg-emerald-600 text-white text-[12px] font-medium px-3 py-1.5 rounded-md">Send Reply</button>
-            <button onClick={() => setReplyBlob(null)} className="text-[12px] text-zinc-500 hover:text-zinc-300">Cancel</button>
+            <button onClick={() => setReplyBlob(null)} className="text-[12px] text-zinc-300 hover:text-zinc-100">Cancel</button>
           </div>
         )}
       </div>
@@ -972,26 +1032,14 @@ export default function DashboardPage() {
   /* ═══════════════════════════════════════ RENDER ═══════════════════════════════════════ */
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] flex flex-col text-[15px]">
+    <div className="h-dvh max-h-dvh overflow-hidden bg-[var(--bg)] flex flex-col text-[15px]">
 
       <DashboardHeader
         user={user}
         extra={
-          <>
-            <div className="hidden sm:flex items-center gap-2">
-              <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
-                className="input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
-                {modelOptions.map(id => <option key={id} value={id}>{audioModelLabel(id)}</option>)}
-              </select>
-              <button onClick={openNewTask} className="h-8 px-3.5 inline-flex items-center gap-1.5 bg-gradient-to-b from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-[12px] font-medium rounded-md transition-all shadow-[0_1px_3px_rgb(99_102_241/0.25)] active:scale-[0.98]">
-                <PlusIcon /> New Task
-              </button>
-            </div>
-            <select value={aiModel} onChange={e => { setAiModel(e.target.value); fetch('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: e.target.value }) }); }}
-              className="sm:hidden input-field px-2.5 py-1 text-[11px] w-auto cursor-pointer">
-              {modelOptions.map(id => <option key={id} value={id}>{audioModelLabel(id)}</option>)}
-            </select>
-          </>
+          <button onClick={openNewTask} className="hidden sm:inline-flex h-8 px-3.5 items-center gap-1.5 bg-gradient-to-b from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-[12px] font-medium rounded-md transition-all shadow-[0_1px_3px_rgb(99_102_241/0.25)] active:scale-[0.98]">
+            <PlusIcon /> New Task
+          </button>
         }
       >
         {(pendingCount > 0 || waitingCount > 0) && (
@@ -1015,24 +1063,26 @@ export default function DashboardPage() {
       {notice && <div className="bg-emerald-950/30 border-b border-emerald-900/30 text-emerald-400 text-[12px] flex items-center px-4 py-2 flex-shrink-0"><span className="flex-1">{notice}</span><button onClick={() => setNotice(null)} className="text-emerald-500/70 hover:text-emerald-400 ml-3">Dismiss</button></div>}
 
       {/* ═══════ TOOLBAR ═══════ */}
-      <div className="border-b border-[var(--border)] bg-[var(--surface)] flex-shrink-0">
-        <div role="tablist" aria-label="Tasks" className="grid grid-cols-3 gap-1 p-2">
+      <div className="border-b border-[var(--border)] bg-[var(--surface)] flex-shrink-0 px-3 py-2 flex items-center gap-2 flex-wrap">
+        <div role="tablist" aria-label="Tasks" className="inline-flex items-center gap-1">
           {TASK_LIST_SCOPES.map((id) => (
             <button
               key={id}
               type="button"
               role="tab"
               aria-selected={taskScope === id}
-              onClick={() => setTaskScope(id)}
-              className={`min-h-11 px-1.5 py-1.5 rounded-lg text-[12px] font-medium text-center leading-tight transition-colors ${taskScope === id ? 'bg-violet-600 text-white' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
+              onClick={() => {
+                if (taskScope && id !== taskScope) closeTask();
+                setTaskScope(id);
+              }}
+              className={`inline-flex items-center justify-center h-7 px-2 text-[11px] font-medium leading-none rounded-md whitespace-nowrap transition-colors ${taskScope === id ? 'bg-violet-600 text-white' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
             >
               {taskListScopeLabel(id)}
             </button>
           ))}
         </div>
-        <div className="min-h-11 flex items-center gap-2 px-4 pb-2 flex-wrap">
         {needsConfirmationOnly && (
-          <button type="button" onClick={() => setNeedsConfirmationOnly(false)} className="inline-flex items-center gap-1.5 min-h-11 px-2.5 rounded-md text-[12px] font-medium bg-amber-950/50 text-amber-300 border border-amber-800/40">
+          <button type="button" onClick={() => setNeedsConfirmationOnly(false)} className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[11px] font-medium bg-amber-950/50 text-amber-300 border border-amber-800/40">
             Needs confirmation <span aria-hidden="true">×</span>
           </button>
         )}
@@ -1051,36 +1101,42 @@ export default function DashboardPage() {
             )}
           </select>
         )}
-        <StatusFilter value={filterStatus} onChange={setFilterStatus} />
+        <StatusFilter value={filterStatus} onChange={(status) => {
+          setFilterStatus(status);
+          if (selectedTask && taskHiddenByFilters(selectedTask, { status, search: searchQuery, needsConfirmationOnly })) closeTask();
+        }} />
         <div className="relative ml-auto">
-          <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search…" className="input-field pl-3 pr-7 py-1 text-[12px] w-36"/>
-          {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 text-[10px]">✕</button>}
-        </div>
+          <input type="text" value={searchQuery} onChange={e => {
+            const next = e.target.value;
+            setSearchQuery(next);
+            if (selectedTask && taskHiddenByFilters(selectedTask, { status: filterStatus, search: next, needsConfirmationOnly })) closeTask();
+          }} placeholder="Search…" className="input-field pl-3 pr-7 py-1 text-[12px] w-36"/>
+          {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 text-[10px]">✕</button>}
         </div>
       </div>
 
       {/* ═══════ BODY ═══════ */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex overflow-hidden">
 
-        {/* ── Desktop Kanban board ── */}
-        <div className="hidden sm:flex flex-col border-r border-[var(--border)] bg-[var(--bg)] overflow-hidden" style={{ width: selectedTask ? '55%' : '100%' }}>
-          <div className="flex-1 flex gap-3 p-4 overflow-x-auto overflow-y-hidden">
-            {TASK_STATUSES.map(({ value: status, label: colLabel }) => {
+        {/* ── Desktop Kanban board. Detail is an overlay so columns keep their width. ── */}
+        <div className="hidden sm:flex flex-1 min-h-0 flex-col bg-[var(--bg)] overflow-hidden">
+          <div className="flex-1 min-h-0 flex gap-3 p-3 overflow-x-auto overflow-y-hidden">
+            {columns.map(({ value: status, label: colLabel }) => {
               const colTasks = boardTasks.filter(t => t.status === status);
               const colHeaderBg = status === 'todo' ? 'bg-zinc-950/20' : status === 'in_progress' ? 'bg-blue-950/20' : status === 'waiting' ? 'bg-red-950/20' : 'bg-emerald-950/20';
               const colDot = status === 'todo' ? 'bg-zinc-500' : status === 'in_progress' ? 'bg-blue-500' : status === 'waiting' ? 'bg-red-500' : 'bg-emerald-500';
               return (
-                <div key={status} className="flex-1 min-w-[220px] max-w-[360px] flex flex-col bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden">
-                  <div className={`flex items-center justify-between px-3 py-2.5 border-b border-[var(--border)] ${colHeaderBg} flex-shrink-0`}>
+                <div key={status} className="flex-1 min-w-[240px] max-w-[420px] min-h-0 flex flex-col bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden">
+                  <div className={`flex items-center justify-between px-3 py-2 border-b border-[var(--border)] ${colHeaderBg} flex-shrink-0`}>
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${colDot}`} />
                       <h3 className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">{colLabel}</h3>
                     </div>
-                    <span className="text-[11px] font-medium text-zinc-600 tabular-nums">{colTasks.length}</span>
+                    <span className="text-[11px] font-medium text-zinc-500 tabular-nums">{colTasks.length}</span>
                   </div>
-                  <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                  <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
                     {colTasks.length === 0 ? (
-                      <div className="flex items-center justify-center h-20 px-2 text-center text-[11px] text-zinc-700 italic">{tasks.length === 0 ? scopeEmptyMessage : 'No tasks'}</div>
+                      <div className="flex items-center justify-center h-20 px-2 text-center text-[12px] text-zinc-400">{tasks.length === 0 ? scopeEmptyMessage : 'No tasks'}</div>
                     ) : (colTasks.map(task => renderKanbanCard(task)))}
                   </div>
                 </div>
@@ -1095,28 +1151,28 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Mobile: tabbed Kanban ── */}
-        <div className="sm:hidden flex flex-col flex-1 overflow-hidden">
-          {/* Status tabs */}
-          {!needsConfirmationOnly && <div className="flex gap-1 p-2 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0">
+        <div className="sm:hidden flex flex-col flex-1 min-h-0 overflow-hidden">
+          {/* Status tabs. A selected status chip already focuses one list, so these stay hidden then. */}
+          {!needsConfirmationOnly && !filterStatus && <div className="flex gap-1 p-2 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0">
             {TASK_STATUSES.map(({ value: s, shortLabel: label }) => {
               const count = boardTasks.filter(t => t.status === s).length;
               return (
                 <button key={s} onClick={() => setKanbanTab(s)}
-                  className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all text-center ${kanbanTab === s ? 'bg-zinc-800 text-zinc-200 shadow-sm' : 'text-zinc-500'}`}>
+                  className={`flex-1 py-1.5 rounded-lg text-[10px] font-medium whitespace-nowrap transition-all text-center ${kanbanTab === s ? 'bg-zinc-800 text-zinc-200 shadow-sm' : 'text-zinc-400'}`}>
                   {label} {count > 0 && <span className="text-zinc-600 ml-0.5">{count}</span>}
                 </button>
               );
             })}
           </div>}
           {/* Active tab cards. The confirmation filter spans every status so a task is not stuck on another tab. */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
             {tasks.length === 0 ? (
-              <div className="flex items-center justify-center py-16 px-6 text-center text-[13px] text-zinc-500">{scopeEmptyMessage}</div>
+              <div className="flex items-center justify-center py-16 px-6 text-center text-[13px] text-zinc-400">{scopeEmptyMessage}</div>
             ) : boardTasks.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-[12px] text-zinc-600 italic">No tasks need confirmation</div>
-            ) : (needsConfirmationOnly ? boardTasks : boardTasks.filter(t => t.status === kanbanTab)).length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-[12px] text-zinc-600 italic">No tasks here</div>
-            ) : (needsConfirmationOnly ? boardTasks : boardTasks.filter(t => t.status === kanbanTab)).map(task => renderKanbanCard(task))}
+              <div className="flex items-center justify-center py-16 text-[12px] text-zinc-400">No tasks need confirmation</div>
+            ) : (needsConfirmationOnly || filterStatus ? boardTasks : boardTasks.filter(t => t.status === kanbanTab)).length === 0 ? (
+              <div className="flex items-center justify-center py-16 text-[12px] text-zinc-400">No tasks here</div>
+            ) : (needsConfirmationOnly || filterStatus ? boardTasks : boardTasks.filter(t => t.status === kanbanTab)).map(task => renderKanbanCard(task))}
           </div>
           {/* Bottom stat bar */}
           <div className="h-8 flex items-center gap-3 px-3 border-t border-[var(--border)] bg-[var(--surface)] flex-shrink-0 text-[10px] text-zinc-600">
@@ -1125,35 +1181,48 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* ── Detail panel (desktop: side panel, mobile: fullscreen overlay) ── */}
-        {selectedTask && (() => {
-          const t = selectedTask;
-          const pendingQ = (t.questions || []).filter((_, i) => !(t.answered_questions || [] as number[]).includes(i));
-          return (
-            <>
-              {/* Desktop side panel */}
-              <div className="hidden sm:block flex-1 overflow-y-auto bg-[var(--bg)]">
-                <div className="max-w-[640px] mx-auto p-5 sm:p-8">
+      </div>
+
+      {/* Detail drawer. Overlay so the board columns stay full width. */}
+      {selectedTask && (() => {
+        const t = selectedTask;
+        const pendingQ = (t.questions || []).filter((_, i) => !(t.answered_questions || [] as number[]).includes(i));
+        const copyLink = () => {
+          const href = `${window.location.origin}${taskShareHref(taskScope, t.id)}`;
+          if (navigator.clipboard?.writeText) {
+            void navigator.clipboard.writeText(href).then(() => setNotice('Link copied.')).catch(() => setNotice(href));
+            return;
+          }
+          setNotice(href);
+        };
+        return (
+          <>
+            <div className="hidden sm:flex fixed inset-0 z-40">
+              <button type="button" aria-label="Close task details" className="absolute inset-0 bg-black/60" onClick={closeTask} />
+              <aside className="relative ml-auto flex h-full w-full max-w-[440px] min-h-0 flex-col border-l border-[var(--border)] bg-[var(--bg)] shadow-2xl">
+                <div className="flex items-center justify-between gap-2 px-4 h-11 border-b border-[var(--border)] bg-[var(--surface)] flex-shrink-0">
+                  <button type="button" onClick={closeTask} className="text-[12px] font-medium text-zinc-200 hover:text-white">Close</button>
+                  <button type="button" onClick={copyLink} className="text-[12px] font-medium text-zinc-300 hover:text-white">Copy link</button>
+                </div>
+                <div className="flex-1 min-h-0 overflow-y-auto p-5">
+                  {renderDetailContent(t, pendingQ)}
+                </div>
+              </aside>
+            </div>
+            {mobileDetail && (
+              <div className="sm:hidden fixed inset-0 z-40 bg-[var(--bg)] overflow-y-auto animate-[slideUp_0.2s_ease-out]">
+                <div className="p-4 pt-14">
+                  <button onClick={closeTask}
+                    className="fixed top-0 left-0 right-0 z-50 h-12 flex items-center gap-2 px-4 bg-[var(--surface)] border-b border-[var(--border)] text-[13px] font-medium text-zinc-200">
+                    ← Back to Board
+                  </button>
                   {renderDetailContent(t, pendingQ)}
                 </div>
               </div>
-              {/* Mobile fullscreen overlay */}
-              {mobileDetail && (
-                <div className="sm:hidden fixed inset-0 z-40 bg-[var(--bg)] overflow-y-auto animate-[slideUp_0.2s_ease-out]">
-                  <div className="p-4 pt-14">
-                    <button onClick={() => { setSelectedTask(null); setMobileDetail(false); }}
-                      className="fixed top-0 left-0 right-0 z-50 h-12 flex items-center gap-2 px-4 bg-[var(--surface)] border-b border-[var(--border)] text-[13px] font-medium text-zinc-300">
-                      ← Back to Board
-                    </button>
-                    {renderDetailContent(t, pendingQ)}
-                  </div>
-                </div>
-              )}
-            </>
-          );
-        })()}
-
-      </div>
+            )}
+          </>
+        );
+      })()}
 
       {/* ═══════ NEW TASK / REMINDER MODAL ═══════ */}
       {showNewTask && (
@@ -1180,7 +1249,7 @@ export default function DashboardPage() {
                     <MicIcon />
                   </div>
                   <h3 className="text-base font-semibold text-zinc-100">{!audioBlob ? (recording ? 'Recording…' : 'New Voice Task') : 'Review'}</h3>
-                  <p className="text-[12px] text-zinc-500 mt-1">{!audioBlob ? (recording ? fmtTime(recordingTime) : 'Tap to speak — or switch to Type if the AI is down') : `${fmtTime(recordingTime)} recorded`}</p>
+                  <p className="text-[12px] text-zinc-400 mt-1">{!audioBlob ? (recording ? fmtTime(recordingTime) : "Tap to speak. If voice isn't available, use Type instead.") : `${fmtTime(recordingTime)} recorded`}</p>
                 </div>
                 <div className="text-left mb-3">
                   <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Assign to (optional)</label>
@@ -1232,12 +1301,12 @@ export default function DashboardPage() {
                   <DeadlineField value={typedDeadline} onChange={setTypedDeadline} disabled={processing} />
                 </div>
                 <button type="button" onClick={createTypedTask} disabled={!typedText.trim() || !assigneeId || processing}
-                  className="w-full inline-flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white py-2.5 rounded-lg text-[13px] font-medium transition-all shadow-[0_2px_8px_rgb(99_102_241/0.3)]">
+                  className={`w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-medium transition-all ${typedText.trim() && assigneeId && !processing ? 'bg-violet-600 hover:bg-violet-500 text-white shadow-[0_2px_8px_rgb(99_102_241/0.35)]' : 'bg-zinc-800 text-zinc-400 cursor-not-allowed'}`}>
                   {processing ? <><Spinner className="w-3.5 h-3.5 border-2 border-white" /> Creating…</> : 'Create Reminder'}
                 </button>
               </div>
             )}
-            <button type="button" disabled={processing} onClick={() => { setShowNewTask(false); setNeedAssignee(false); setVoiceUnclear(null); setConfirmUnclear(false); stopRecording(); }} className="w-full mt-3 text-[12px] text-zinc-600 hover:text-zinc-400 py-1.5 transition-colors disabled:opacity-40">Cancel</button>
+            <button type="button" disabled={processing} onClick={() => { setShowNewTask(false); setNeedAssignee(false); setVoiceUnclear(null); setConfirmUnclear(false); stopRecording(); }} className="w-full mt-3 text-[12px] text-zinc-300 hover:text-zinc-100 py-1.5 transition-colors disabled:opacity-40">Cancel</button>
           </div>
         </div>
       )}

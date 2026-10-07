@@ -19,6 +19,9 @@ export default function AccountPage() {
 
   const [targetId, setTargetId] = useState('');
   const [targetPw, setTargetPw] = useState('');
+  const [aiModel, setAiModel] = useState('ag/gemini-3.7-flash-high');
+  const [modelOptions, setModelOptions] = useState<string[]>(['ag/gemini-3.7-flash-high']);
+  const [modelBusy, setModelBusy] = useState(false);
 
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' }).then(r => r.json()).then(d => {
@@ -26,7 +29,40 @@ export default function AccountPage() {
       setMe(d.user);
     }).finally(() => setLoading(false));
     fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users || []));
+    fetch('/api/settings/model').then(r => r.json()).then(d => {
+      const options: string[] = Array.isArray(d.options) && d.options.length ? d.options : ['ag/gemini-3.7-flash-high'];
+      const model = d.model && options.includes(d.model) ? d.model : (options[0] || 'ag/gemini-3.7-flash-high');
+      setModelOptions(options);
+      setAiModel(model);
+    });
   }, []);
+
+  const audioModelLabel = (id: string) => ({
+    'ag/gemini-3.7-flash-high': 'Gemini 3.7 Flash',
+    'ag/gemini-3-flash': 'Gemini 3 Flash',
+    'ag/gemini-3.6-flash-medium': 'Gemini 3.6 Flash',
+    'ag/gemini-3-flash-agent': 'Gemini 3 Flash Agent',
+  } as Record<string, string>)[id] || id.replace(/^ag\//, '');
+
+  const saveModel = async (model: string) => {
+    setAiModel(model);
+    setModelBusy(true);
+    setMsg(null);
+    try {
+      const r = await fetch('/api/settings/model', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Could not save the voice model');
+      setMsg({ ok: true, text: 'Voice model saved. New voice tasks use it.' });
+    } catch (err) {
+      setMsg({ ok: false, text: err instanceof Error ? err.message : 'Could not save the voice model' });
+    } finally {
+      setModelBusy(false);
+    }
+  };
 
   const isBoss = me?.role === 'boss';
 
@@ -82,6 +118,21 @@ export default function AccountPage() {
         {msg && (
           <div className={`text-[12px] px-3 py-2 rounded-md border ${msg.ok ? 'bg-emerald-950/30 border-emerald-900/40 text-emerald-400' : 'bg-red-950/30 border-red-900/30 text-red-400'}`}>{msg.text}</div>
         )}
+
+        <section className="card p-5">
+          <h2 className="text-[12px] font-semibold text-zinc-200 mb-1">Voice model</h2>
+          <p className="text-[11px] text-zinc-400 mb-3">Used when you create a voice task. This stays off the board header.</p>
+          <label className="block text-[11px] font-medium text-zinc-400 uppercase tracking-wider mb-1.5" htmlFor="voice-model">Model</label>
+          <select
+            id="voice-model"
+            value={aiModel}
+            disabled={modelBusy}
+            onChange={(e) => { void saveModel(e.target.value); }}
+            className="input-field w-full px-3 py-2.5 text-[14px] cursor-pointer disabled:opacity-50"
+          >
+            {modelOptions.map((id) => <option key={id} value={id}>{audioModelLabel(id)}</option>)}
+          </select>
+        </section>
 
         <section className="card p-5">
           <h2 className="text-[12px] font-semibold text-zinc-200 mb-1">Change your password</h2>
