@@ -101,6 +101,7 @@ function notifyAssignee(
   extra?: {
     assigneeName?: string;
     assigneeOpenId?: string | null;
+    assigneeEmail?: string | null;
     priority?: string | null;
     creatorName?: string;
     creatorId?: string;
@@ -120,6 +121,7 @@ function notifyAssignee(
     assigneeName: extra?.assigneeName || 'Unknown',
     assigneeId,
     assigneeOpenId: extra?.assigneeOpenId,
+    assigneeEmail: extra?.assigneeEmail,
     priority: extra?.priority,
     taskId,
   });
@@ -130,8 +132,8 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const input = await readCreateInput(request);
-  const team = await queryAll<{ id: string; name: string; lark_open_id: string | null }>(
-    'SELECT id, name, lark_open_id FROM users ORDER BY name',
+  const team = await queryAll<{ id: string; email: string; name: string; lark_open_id: string | null }>(
+    'SELECT id, email, name, lark_open_id FROM users ORDER BY name',
   );
 
   // Typed path: no voice, no LLM. Works even when Gemini is down.
@@ -194,6 +196,7 @@ export async function POST(request: NextRequest) {
     notifyAssignee(formUser.id, fields.title || fields.title_id, taskId, {
       assigneeName: formUser.name,
       assigneeOpenId: formUser.lark_open_id,
+      assigneeEmail: formUser.email,
       priority: fields.priority,
       creatorName: user.name,
       creatorId: user.id,
@@ -282,6 +285,7 @@ export async function POST(request: NextRequest) {
   notifyAssignee(assigneeId, title || titleId, taskId, {
     assigneeName,
     assigneeOpenId: assignee.lark_open_id,
+    assigneeEmail: assignee.email,
     priority: ai?.priority ?? 'medium',
     creatorName: user.name,
     creatorId: user.id,

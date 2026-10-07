@@ -10,6 +10,8 @@ export type LarkTaskNotifyInput = {
   assigneeId?: string;
   /** Stored Lark open_id / union_id / user_id when already known. */
   assigneeOpenId?: string | null;
+  /** Login email, or any other address already known for this assignee. */
+  assigneeEmail?: string | null;
   priority?: string | null;
   /** Task id so the group message can link to the screenshot. */
   taskId?: string;
@@ -40,6 +42,7 @@ let missingEnvLogged = false;
 let membersLookupLogged = false;
 let cachedToken: TokenCache | null = null;
 let cachedMembers: MemberCache | null = null;
+let cachedEmailOpenIds = new Map<string, { openId: string; expiresAt: number }>();
 
 /** Test helper — clears token cache, member cache, and one-shot log flags. */
 export function resetLarkStateForTests(): void {
@@ -47,6 +50,7 @@ export function resetLarkStateForTests(): void {
   membersLookupLogged = false;
   cachedToken = null;
   cachedMembers = null;
+  cachedEmailOpenIds = new Map();
 }
 
 function trimEnv(name: string): string {
@@ -206,6 +210,178 @@ export function parseLarkOpenIdMap(raw: string): Map<string, string> {
     map.set(label, id);
   }
   return map;
+}
+
+function normalizeEmail(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const email = value.trim().toLowerCase();
+  if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(email)) return null;
+  return email;
+}
+
+/**
+ * Parse an assignee → directory-email map. Same shapes as LARK_OPEN_IDS:
+ * JSON `{"boss-001":"ian@dupoin.com"}` or `boss-001:ian@dupoin.com,Bayu=bayu@dupoin.co.id`.
+ * Keys are BossNote user ids or display names. Values that are not emails are dropped.
+ */
+export function parseLarkEmailMap(raw: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const text = (raw || '').trim();
+  if (!text) return map;
+
+  const entries: Array<[string, string]> = [];
+  if (text.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return map;
+      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof value === 'string') entries.push([key, value]);
+      }
+    } catch {
+      return map;
+    }
+  } else {
+    for (const part of text.split(',')) {
+      const item = part.trim();
+      if (!item) continue;
+      const colon = item.indexOf(':');
+      const equals = item.indexOf('=');
+      let sep = -1;
+      if (colon > 0 && (equals <= 0 || colon < equals)) sep = colon;
+      else if (equals > 0) sep = equals;
+      if (sep <= 0) continue;
+      entries.push([item.slice(0, sep), item.slice(sep + 1)]);
+    }
+  }
+
+  for (const [key, value] of entries) {
+    const email = normalizeEmail(value);
+    const label = key.trim().toLowerCase();
+    if (!label || !email) continue;
+    map.set(label, email);
+  }
+  return map;
+}
+
+/**
+ * Dupoin addresses that exist in Lark. BossNote login emails are @bossnote.id
+ * and are not in the Lark directory. Ian's user id is boss-001 (there is no ian-001).
+ * Bayu's Dupoin email is not in this repo.
+ */
+const DEFAULT_LARK_ASSIGNEE_EMAILS = [
+  'boss-001:ian@dupoin.com',
+  'Ian:ian@dupoin.com',
+  'Boss:ian@dupoin.com',
+  'sandra-001:alessandra.jovita@dupoin.co.id',
+  'Sandra:alessandra.jovita@dupoin.co.id',
+  'Alessandra:alessandra.jovita@dupoin.co.id',
+  'prista-001:prista.regina@dupoin.co.id',
+  'Prista:prista.regina@dupoin.co.id',
+].join(',');
+
+function emailFromMap(map: Map<string, string>, assigneeId: string, assigneeName: string): string | null {
+  if (assigneeId && map.has(assigneeId)) return map.get(assigneeId) || null;
+  const folded = foldPersonName(assigneeName);
+  if (!folded) return null;
+  for (const [key, email] of map) {
+    if (isIdLikeKey(key)) continue;
+    if (foldPersonName(key) === folded) return email;
+  }
+  return null;
+}
+
+/**
+ * Directory email to send to Lark contact batch_get_id.
+ * LARK_ASSIGNEE_EMAILS overrides one key at a time. Built-in Dupoin addresses
+ * win over the BossNote login email. A passed email is used only when neither map hits.
+ */
+export function resolveAssigneeLarkEmail(input: {
+  assigneeId?: string;
+  assigneeName?: string;
+  assigneeEmail?: string | null;
+}): string | null {
+  const assigneeId = (input.assigneeId || '').trim().toLowerCase();
+  const assigneeName = (input.assigneeName || '').trim();
+  const fromEnv = emailFromMap(parseLarkEmailMap(trimEnv('LARK_ASSIGNEE_EMAILS')), assigneeId, assigneeName);
+  if (fromEnv) return fromEnv;
+  const fromDefault = emailFromMap(parseLarkEmailMap(DEFAULT_LARK_ASSIGNEE_EMAILS), assigneeId, assigneeName);
+  if (fromDefault) return fromDefault;
+  return normalizeEmail(input.assigneeEmail);
+}
+
+type BatchGetIdUser = {
+  user_id?: string;
+  email?: string;
+};
+
+type BatchGetIdResponse = {
+  code?: number;
+  msg?: string;
+  data?: {
+    user_list?: BatchGetIdUser[];
+  };
+};
+
+function openIdFromEmailUserList(email: string, list: BatchGetIdUser[] | undefined): string | null {
+  if (!list || list.length === 0) return null;
+  const wanted = email.toLowerCase();
+  const matched = list.filter((item) => (item.email || '').trim().toLowerCase() === wanted);
+  const candidates = matched.length > 0 ? matched : list.length === 1 ? list : [];
+  for (const item of candidates) {
+    const id = normalizeLarkOpenId(item.user_id);
+    if (id) return id;
+  }
+  return null;
+}
+
+/**
+ * POST /contact/v3/users/batch_get_id?user_id_type=open_id
+ * Resolves one directory email to a Lark open_id. Never throws.
+ */
+export async function lookupLarkOpenIdByEmail(email: string): Promise<string | null> {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
+
+  try {
+    const now = Date.now();
+    const cached = cachedEmailOpenIds.get(normalized);
+    if (cached && cached.expiresAt > now) return cached.openId;
+
+    const config = readConfig();
+    if (!config) return null;
+    const token = await getTenantToken();
+    if (!token) return null;
+
+    const res = await fetch(`${config.apiBase}/contact/v3/users/batch_get_id?user_id_type=open_id`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+      body: JSON.stringify({ emails: [normalized], include_resigned: false }),
+    });
+    const data = (await res.json().catch(() => ({}))) as BatchGetIdResponse;
+    if (!res.ok || (typeof data.code === 'number' && data.code !== 0)) {
+      console.error(
+        '[lark] email open_id lookup failed',
+        normalized,
+        data.code ?? res.status,
+        data.msg ?? res.statusText,
+      );
+      return null;
+    }
+
+    const openId = openIdFromEmailUserList(normalized, data.data?.user_list);
+    if (!openId) {
+      console.warn('[lark] no Lark open_id for email', normalized);
+      return null;
+    }
+    cachedEmailOpenIds.set(normalized, { openId, expiresAt: now + MEMBER_CACHE_MS });
+    return openId;
+  } catch (err) {
+    console.error('[lark] email open_id lookup failed', normalized, err);
+    return null;
+  }
 }
 
 export function buildTaskNotifyText(input: LarkTaskNotifyInput): string {
@@ -388,13 +564,15 @@ async function chatMemberOpenIdByName(name: string): Promise<string | null> {
 }
 
 /**
- * Resolve a Lark user id for @mention. Never throws.
- * Order: stored open_id → LARK_OPEN_IDS (id or name) → group member name match.
+ * Resolve a Lark user id for @mention and the assignee DM. Never throws.
+ * Order: stored open_id → LARK_OPEN_IDS (id or name) → directory email
+ * (contact/v3/users/batch_get_id) → group member name match.
  */
 export async function resolveAssigneeOpenId(input: {
   assigneeId?: string;
   assigneeName?: string;
   assigneeOpenId?: string | null;
+  assigneeEmail?: string | null;
 }): Promise<string | null> {
   try {
     const stored = normalizeLarkOpenId(input.assigneeOpenId);
@@ -406,6 +584,16 @@ export async function resolveAssigneeOpenId(input: {
     const assigneeName = (input.assigneeName || '').trim();
     const fromEnv = matchOpenIdByPersonName(assigneeName, foldedNameIndex(envMap));
     if (fromEnv) return fromEnv;
+
+    const email = resolveAssigneeLarkEmail({
+      assigneeId,
+      assigneeName,
+      assigneeEmail: input.assigneeEmail,
+    });
+    if (email) {
+      const fromEmail = await lookupLarkOpenIdByEmail(email);
+      if (fromEmail) return fromEmail;
+    }
 
     return await chatMemberOpenIdByName(assigneeName);
   } catch (err) {

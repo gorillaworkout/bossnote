@@ -1,6 +1,7 @@
 export interface MemberRef {
   id: string;
   name: string;
+  email?: string | null;
   lark_open_id?: string | null;
 }
 

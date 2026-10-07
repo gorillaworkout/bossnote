@@ -6,11 +6,14 @@ import {
   formatLarkMention,
   getTenantToken,
   isLarkConfigured,
+  lookupLarkOpenIdByEmail,
   matchOpenIdByPersonName,
   normalizeLarkOpenId,
   notifyLarkTaskAsync,
+  parseLarkEmailMap,
   parseLarkOpenIdMap,
   resetLarkStateForTests,
+  resolveAssigneeLarkEmail,
   resolveAssigneeOpenId,
   sendGroupText,
   sendUserText,
@@ -23,6 +26,7 @@ const savedEnv = {
   LARK_CHAT_ID: process.env.LARK_CHAT_ID,
   LARK_API_BASE: process.env.LARK_API_BASE,
   LARK_OPEN_IDS: process.env.LARK_OPEN_IDS,
+  LARK_ASSIGNEE_EMAILS: process.env.LARK_ASSIGNEE_EMAILS,
   BOSSNOTE_URL: process.env.BOSSNOTE_URL,
   APP_URL: process.env.APP_URL,
   NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
@@ -204,6 +208,63 @@ describe('formatLarkMention / normalizeLarkOpenId / parseLarkOpenIdMap', () => {
     assert.equal(parseLarkOpenIdMap('').size, 0);
     assert.equal(parseLarkOpenIdMap('{not-json').size, 0);
   });
+
+  it('parses an assignee email map and drops values that are not emails', () => {
+    const json = parseLarkEmailMap(
+      '{"boss-001":"ian@dupoin.com","Sandra":"alessandra.jovita@dupoin.co.id","nope":"not-an-email","blank":"  "}',
+    );
+    assert.equal(json.get('boss-001'), 'ian@dupoin.com');
+    assert.equal(json.get('sandra'), 'alessandra.jovita@dupoin.co.id');
+    assert.equal(json.has('nope'), false);
+    assert.equal(json.has('blank'), false);
+
+    const csv = parseLarkEmailMap('prista-001:prista.regina@dupoin.co.id, Bayu=bayu.ops@dupoin.co.id');
+    assert.equal(csv.get('prista-001'), 'prista.regina@dupoin.co.id');
+    assert.equal(csv.get('bayu'), 'bayu.ops@dupoin.co.id');
+    assert.equal(parseLarkEmailMap('').size, 0);
+    assert.equal(parseLarkEmailMap('{not-json').size, 0);
+  });
+});
+
+describe('resolveAssigneeLarkEmail', () => {
+  it('uses Dupoin directory emails for Ian, Sandra, and Prista', () => {
+    delete process.env.LARK_ASSIGNEE_EMAILS;
+    assert.equal(
+      resolveAssigneeLarkEmail({ assigneeId: 'boss-001', assigneeName: 'Ian', assigneeEmail: 'ian@bossnote.id' }),
+      'ian@dupoin.com',
+    );
+    assert.equal(resolveAssigneeLarkEmail({ assigneeName: 'Boss' }), 'ian@dupoin.com');
+    assert.equal(
+      resolveAssigneeLarkEmail({ assigneeId: 'sandra-001', assigneeName: 'Sandra' }),
+      'alessandra.jovita@dupoin.co.id',
+    );
+    assert.equal(
+      resolveAssigneeLarkEmail({ assigneeName: 'Alessandra' }),
+      'alessandra.jovita@dupoin.co.id',
+    );
+    assert.equal(
+      resolveAssigneeLarkEmail({ assigneeId: 'prista-001', assigneeName: 'Prista' }),
+      'prista.regina@dupoin.co.id',
+    );
+    assert.equal(resolveAssigneeLarkEmail({ assigneeId: 'bayu-001', assigneeName: 'Bayu' }), null);
+    assert.equal(
+      resolveAssigneeLarkEmail({ assigneeId: 'bayu-001', assigneeEmail: 'bayu.ops@dupoin.co.id' }),
+      'bayu.ops@dupoin.co.id',
+    );
+  });
+
+  it('lets LARK_ASSIGNEE_EMAILS override one person without dropping the defaults', () => {
+    process.env.LARK_ASSIGNEE_EMAILS = '{"bayu-001":"bayu.ops@dupoin.co.id","boss-001":"ian.other@dupoin.com"}';
+    assert.equal(
+      resolveAssigneeLarkEmail({ assigneeId: 'bayu-001', assigneeName: 'Bayu' }),
+      'bayu.ops@dupoin.co.id',
+    );
+    assert.equal(resolveAssigneeLarkEmail({ assigneeId: 'boss-001' }), 'ian.other@dupoin.com');
+    assert.equal(
+      resolveAssigneeLarkEmail({ assigneeId: 'prista-001' }),
+      'prista.regina@dupoin.co.id',
+    );
+  });
 });
 
 describe('sendGroupText / getTenantToken', () => {
@@ -303,6 +364,148 @@ describe('resolveAssigneeOpenId / notifyLarkTaskAsync', () => {
     assert.equal(calls.length, 0);
   });
 
+  it('uses LARK_OPEN_IDS before an email directory lookup', async () => {
+    setLarkEnv();
+    delete process.env.LARK_ASSIGNEE_EMAILS;
+    process.env.LARK_OPEN_IDS = 'boss-001:ou_from_env';
+    const calls = mockFetch((url) => {
+      if (url.includes('/contact/v3/users/batch_get_id')) {
+        return jsonResponse({
+          code: 0,
+          data: { user_list: [{ email: 'ian@dupoin.com', user_id: 'ou_from_email' }] },
+        });
+      }
+      return jsonResponse({ code: 0, tenant_access_token: 't-abc', expire: 7200 });
+    });
+    assert.equal(
+      await resolveAssigneeOpenId({ assigneeId: 'boss-001', assigneeName: 'Ian', assigneeEmail: 'ian@bossnote.id' }),
+      'ou_from_env',
+    );
+    assert.equal(calls.filter((c) => c.url.includes('batch_get_id')).length, 0);
+  });
+
+  it('resolves a Dupoin email through contact batch_get_id before chat members', async () => {
+    setLarkEnv();
+    delete process.env.LARK_OPEN_IDS;
+    delete process.env.LARK_ASSIGNEE_EMAILS;
+    const calls = mockFetch((url, init) => {
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return jsonResponse({ code: 0, msg: 'ok', tenant_access_token: 't-abc', expire: 7200 });
+      }
+      if (url.includes('/contact/v3/users/batch_get_id')) {
+        const body = JSON.parse(String(init?.body)) as { emails?: string[] };
+        assert.deepEqual(body.emails, ['alessandra.jovita@dupoin.co.id']);
+        return jsonResponse({
+          code: 0,
+          msg: 'success',
+          data: {
+            user_list: [{ email: 'alessandra.jovita@dupoin.co.id', user_id: 'ou_sandra_email' }],
+          },
+        });
+      }
+      if (url.includes('/members')) {
+        return jsonResponse({
+          code: 0,
+          data: { items: [{ member_id: 'ou_sandra_chat', name: 'Sandra' }], has_more: false },
+        });
+      }
+      return jsonResponse({ code: 1, msg: `unexpected ${url}` }, 404);
+    });
+
+    const id = await resolveAssigneeOpenId({
+      assigneeId: 'sandra-001',
+      assigneeName: 'Sandra',
+      assigneeEmail: 'sandra@bossnote.id',
+    });
+    assert.equal(id, 'ou_sandra_email');
+    const lookup = calls.find((c) => c.url.includes('/contact/v3/users/batch_get_id'));
+    assert.ok(lookup);
+    assert.match(lookup.url, /user_id_type=open_id/);
+    assert.equal(lookup.init?.method, 'POST');
+    assert.match(
+      String(lookup.init?.headers && (lookup.init.headers as Record<string, string>).Authorization),
+      /Bearer t-abc/,
+    );
+    assert.equal(calls.filter((c) => c.url.includes('/members')).length, 0);
+  });
+
+  it('falls through to chat members when email lookup misses, and never throws when it fails', async () => {
+    setLarkEnv();
+    delete process.env.LARK_OPEN_IDS;
+    delete process.env.LARK_ASSIGNEE_EMAILS;
+    mockFetch((url) => {
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return jsonResponse({ code: 0, msg: 'ok', tenant_access_token: 't-abc', expire: 7200 });
+      }
+      if (url.includes('/contact/v3/users/batch_get_id')) {
+        return jsonResponse({
+          code: 0,
+          data: { user_list: [{ email: 'ian@dupoin.com', user_id: '' }] },
+        });
+      }
+      if (url.includes('/members')) {
+        return jsonResponse({
+          code: 0,
+          data: { items: [{ member_id: 'ou_ian_chat', name: 'Ian' }], has_more: false },
+        });
+      }
+      return jsonResponse({ code: 1, msg: `unexpected ${url}` }, 404);
+    });
+    assert.equal(
+      await resolveAssigneeOpenId({ assigneeId: 'boss-001', assigneeName: 'Ian' }),
+      'ou_ian_chat',
+    );
+
+    resetLarkStateForTests();
+    mockFetch(() => {
+      throw new Error('network down');
+    });
+    assert.equal(await lookupLarkOpenIdByEmail('ian@dupoin.com'), null);
+    assert.equal(await resolveAssigneeOpenId({ assigneeId: 'boss-001', assigneeName: 'Ian' }), null);
+  });
+
+  it('DMs the assignee when only the Dupoin email lookup resolves an open_id', async () => {
+    setLarkEnv();
+    delete process.env.LARK_OPEN_IDS;
+    delete process.env.LARK_ASSIGNEE_EMAILS;
+    delete process.env.BOSSNOTE_URL;
+    delete process.env.APP_URL;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+    const calls = mockFetch((url) => {
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return jsonResponse({ code: 0, msg: 'ok', tenant_access_token: 't-abc', expire: 7200 });
+      }
+      if (url.includes('/contact/v3/users/batch_get_id')) {
+        return jsonResponse({
+          code: 0,
+          data: { user_list: [{ email: 'prista.regina@dupoin.co.id', user_id: 'ou_prista_email' }] },
+        });
+      }
+      if (url.includes('/im/v1/messages')) return jsonResponse({ code: 0, msg: 'ok' });
+      return jsonResponse({ code: 1, msg: `unexpected ${url}` }, 404);
+    });
+
+    const ok = await notifyLarkTaskAsync({
+      title: 'Check stock',
+      creatorName: 'Ian',
+      creatorId: 'boss-001',
+      assigneeName: 'Prista',
+      assigneeId: 'prista-001',
+      assigneeEmail: 'prista@bossnote.id',
+      priority: 'high',
+      kind: 'reassign',
+    });
+    assert.equal(ok, true);
+    const dm = calls.find((c) => c.url.includes('receive_id_type=open_id'));
+    assert.ok(dm);
+    const body = JSON.parse(String(dm.init?.body)) as { receive_id: string; content: string };
+    assert.equal(body.receive_id, 'ou_prista_email');
+    assert.match(JSON.parse(body.content).text, /^Task reassigned to you: Check stock/);
+    const group = calls.find((c) => c.url.includes('receive_id_type=chat_id'));
+    const groupBody = JSON.parse(String(group?.init?.body)) as { content: string };
+    assert.match(JSON.parse(groupBody.content).text, /user_id="ou_prista_email"/);
+  });
+
   it('uses LARK_OPEN_IDS by user id then name', async () => {
     clearLarkEnv();
     process.env.LARK_OPEN_IDS = 'boss-001:ou_by_id,Bayu:ou_by_name';
@@ -340,8 +543,9 @@ describe('resolveAssigneeOpenId / notifyLarkTaskAsync', () => {
     });
     assert.equal(await resolveAssigneeOpenId({ assigneeName: 'Ian' }), 'ou_ian_chat');
     assert.equal(await resolveAssigneeOpenId({ assigneeName: 'ian' }), 'ou_ian_chat');
-    assert.match(calls[1].url, /im\/v1\/chats\/oc_test_chat\/members/);
-    assert.match(calls[1].url, /member_id_type=open_id/);
+    const membersCall = calls.find((c) => c.url.includes('/im/v1/chats/oc_test_chat/members'));
+    assert.ok(membersCall);
+    assert.match(membersCall.url, /member_id_type=open_id/);
     // Cached — second resolve does not refetch members.
     assert.equal(calls.filter((c) => c.url.includes('/members')).length, 1);
   });

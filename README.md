@@ -75,18 +75,35 @@ Optional:
 ```
 LARK_API_BASE=https://open.larksuite.com/open-apis
 BOSSNOTE_URL=https://your-bossnote-host
-LARK_OPEN_IDS=Boss:ou_boss,Ian:ou_ian,Bayu:ou_bayu
+LARK_OPEN_IDS={"boss-001":"ou_REPLACE","bayu-001":"ou_REPLACE","prista-001":"ou_REPLACE","sandra-001":"ou_REPLACE"}
 ```
 
-`ou_boss` / `ou_ian` / `ou_bayu` above are placeholders. Put the real open_ids in the server env, not in git. Map every name the team actually uses: **Boss** (if a Lark or BossNote profile is named Boss), **Ian**, and **Bayu**. The same open_id can be listed under more than one key (`Ian:ou_same,boss-001:ou_same`) when the display name and the BossNote user id differ.
+`ou_REPLACE` is not a real id. Put the real open_ids in the Oracle env or in `users.lark_open_id`. Do not commit them. Keys are the BossNote user ids from the migrations (Ian is `boss-001`, not `ian-001`). Names still work as keys (`Ian`, `Boss`, `Bayu`, `Prista`, `Sandra`). The same open_id can be listed under more than one key.
 
-**Assignee → Lark id** (first match wins; never blocks task create):
+Optional `LARK_ASSIGNEE_EMAILS` adds or corrects a directory email (same JSON or `id:email` comma form). Use it for Bayu once his Dupoin address is known. It does not replace the built-in list below unless you repeat a key.
 
-1. Optional `users.lark_open_id` — set in **Manage Users → Edit → Lark Open ID**, or apply `migrations/008_lark_open_id.sql` and update SQL.
-2. `LARK_OPEN_IDS` — `Name:ou_xxx` or `bossnote-user-id:ou_xxx` (comma list or JSON object). Use this if chat-member lookup is blocked.
-3. Group member list — `GET /im/v1/chats/{chat_id}/members` matched to the BossNote name (case-insensitive). Needs the bot scope to view group members. Cached a few minutes.
+**Assignee → Lark id** (first match wins; never blocks task create). Create and reassign both DM the assignee when this resolves:
 
-How to get an `ou_…` open_id: Lark Admin / Open Platform (user open_id for this app), or inspect a message the person sent in the group. Lookup matches the BossNote name to the Lark display name, including a unique first name (`Bayu` ↔ `Bayu Darmawan`). Two people sharing that first name are not guessed. Names on the team: Bayu, Ian, Prista, Sandra.
+1. `users.lark_open_id` — **Manage Users → Edit → Lark Open ID**, or `UPDATE users SET lark_open_id = 'ou_…' WHERE id = '…'` after `migrations/008_lark_open_id.sql`.
+2. `LARK_OPEN_IDS` — JSON or comma list, keyed by BossNote user id or display name.
+3. Directory email — `POST /contact/v3/users/batch_get_id?user_id_type=open_id` with the tenant token. Needs scope `contact:user.id:readonly` (obtain user id by email). A miss or an API error is logged and skipped. Successful ids are cached a few minutes in the process. They are not written back to the database.
+4. Group member list — `GET /im/v1/chats/{chat_id}/members` matched to the BossNote name (case-insensitive), including a unique first name (`Bayu` ↔ `Bayu Darmawan`). Two people sharing that first name are not guessed. Needs the bot scope to view group members. Cached a few minutes.
+
+BossNote login emails (`ian@bossnote.id` and the others) are not in Lark. The contact call uses these Dupoin addresses:
+
+| BossNote user id | Names matched | Directory email |
+| --- | --- | --- |
+| `boss-001` | Ian, Boss | `ian@dupoin.com` |
+| `sandra-001` | Sandra, Alessandra | `alessandra.jovita@dupoin.co.id` |
+| `prista-001` | Prista | `prista.regina@dupoin.co.id` |
+| `bayu-001` | Bayu | none in this repo |
+
+After a lookup, copy each returned `user_id` (that field is the open_id when `user_id_type=open_id`) into one of these places on Oracle:
+
+- `LARK_OPEN_IDS` in the server `.env`, then restart the app, or
+- **Manage Users → Edit → Lark Open ID** (column `users.lark_open_id`).
+
+Either one is checked before the contact API, so the DM still works if the contact scope is missing later. The app also calls the contact API on create/reassign when those are empty, so DMs work before the ids are pasted, as long as the bot can read user ids by email and can DM (`im:message.p2p_msg:send_as_bot`).
 
 If any required Lark var is missing, create/reassign still succeeds; Lark is skipped (one warning log). The custom app bot must be in the group and allowed to send messages (`im:message` or `im:message:send_as_bot`, and the group-send scope if the app uses granular permissions). Personal DMs also need permission to message a user, typically `im:message.p2p_msg:send_as_bot`, and the assignee must be in the app’s availability. A DM can still fail if that person has never opened a chat with the bot; BossNote logs it and continues.
 
@@ -169,7 +186,7 @@ Keep the same `proxy_set_header` values the rest of the BossNote site already us
 1. `npm i`
 2. Apply `migrations/007_push_subscriptions.sql`, `migrations/008_lark_open_id.sql`, `migrations/009_task_image.sql`, and `migrations/010_task_images.sql`
 3. Optional: `IMAGE_UPLOAD_DIR=/home/ubuntu/data/bossnote-images` (create the directory; do not commit photos)
-4. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify and assignee DMs, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`, `LARK_OPEN_IDS` with Boss, Ian, and Bayu). Enable bot scopes for group send and user DM (`im:message.p2p_msg:send_as_bot`).
+4. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify and assignee DMs, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`, `LARK_OPEN_IDS` keyed by `boss-001`, `bayu-001`, `prista-001`, `sandra-001`). Enable bot scopes for group send, user DM (`im:message.p2p_msg:send_as_bot`), and email → open_id (`contact:user.id:readonly`). See **Lark group notify** for the Dupoin emails to resolve.
 5. Install the crontab line above
 6. Rebuild / restart (`npm run build && npm start` or your Oracle process manager)
 7. Installed PWAs pick up `bossnote-v8` after the next visit
