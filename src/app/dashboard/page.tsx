@@ -1120,13 +1120,14 @@ export default function DashboardPage() {
 
         {/* ── Desktop Kanban board. Detail is an overlay so columns keep their width. ── */}
         <div className="hidden sm:flex flex-1 min-h-0 flex-col bg-[var(--bg)] overflow-hidden">
-          <div className="flex-1 min-h-0 flex gap-3 p-3 overflow-x-auto overflow-y-hidden">
+          <div data-status-filter={filterStatus || 'all'} className="flex-1 min-h-0 flex gap-3 p-3 overflow-x-auto overflow-y-hidden">
             {columns.map(({ value: status, label: colLabel }) => {
+              if (filterStatus && status !== filterStatus) return null;
               const colTasks = boardTasks.filter(t => t.status === status);
               const colHeaderBg = status === 'todo' ? 'bg-zinc-950/20' : status === 'in_progress' ? 'bg-blue-950/20' : status === 'waiting' ? 'bg-red-950/20' : 'bg-emerald-950/20';
               const colDot = status === 'todo' ? 'bg-zinc-500' : status === 'in_progress' ? 'bg-blue-500' : status === 'waiting' ? 'bg-red-500' : 'bg-emerald-500';
               return (
-                <div key={status} className="flex-1 min-w-[240px] max-w-[420px] min-h-0 flex flex-col bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden">
+                <div key={status} data-status-column={status} className={`${filterStatus ? 'flex-1 min-w-0 w-full max-w-none' : 'flex-1 min-w-[240px] max-w-[420px]'} min-h-0 flex flex-col bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden`}>
                   <div className={`flex items-center justify-between px-3 py-2 border-b border-[var(--border)] ${colHeaderBg} flex-shrink-0`}>
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${colDot}`} />
@@ -1169,7 +1170,7 @@ export default function DashboardPage() {
             {tasks.length === 0 ? (
               <div className="flex items-center justify-center py-16 px-6 text-center text-[13px] text-zinc-400">{scopeEmptyMessage}</div>
             ) : boardTasks.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-[12px] text-zinc-400">No tasks need confirmation</div>
+              <div className="flex items-center justify-center py-16 text-[12px] text-zinc-400">{needsConfirmationOnly ? 'No tasks need confirmation' : 'No tasks'}</div>
             ) : (needsConfirmationOnly || filterStatus ? boardTasks : boardTasks.filter(t => t.status === kanbanTab)).length === 0 ? (
               <div className="flex items-center justify-center py-16 text-[12px] text-zinc-400">No tasks here</div>
             ) : (needsConfirmationOnly || filterStatus ? boardTasks : boardTasks.filter(t => t.status === kanbanTab)).map(task => renderKanbanCard(task))}

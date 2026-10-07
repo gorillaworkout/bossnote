@@ -40,7 +40,7 @@ Add those to `.env` on the server. Also required: `DATABASE_URL`, `JWT_SECRET`, 
 - **Android Chrome:** Allow notifications when prompted (or tap **Enable Push** on the banner).
 - **iOS Safari:** Add to Home Screen first. Web Push only works for the installed PWA. The banner says **Add to Home Screen** until the app is opened from the icon, then tap **Enable Push**. Each device stores its own subscription; a new phone does not replace the Mac.
 
-After login, the dashboard registers `/sw.js?v=8` (`bossnote-v8`). `/api/`, document navigations, and `/manifest.json` are network-only so the `bn_token` session cookie is not dropped on reopen. Non-http(s) schemes (e.g. `chrome-extension://`) are left unhandled so `Cache.put` does not throw. Push subscription is stored at `POST /api/push/subscribe`. `POST /api/push/test` sends a test notification to the current user.
+After login, the dashboard registers `/sw.js?v=9` (`bossnote-v9`). `/api/`, document navigations, `/manifest.json`, `/sw.js`, `/_next/`, and `?_rsc=` requests are network-only so the `bn_token` session cookie is not dropped on reopen and a deploy cannot keep serving the previous dashboard script. Non-http(s) schemes (e.g. `chrome-extension://`) are left unhandled so `Cache.put` does not throw. Push subscription is stored at `POST /api/push/subscribe`. `POST /api/push/test` sends a test notification to the current user.
 
 Login lasts **90 days** on the same browser/PWA (`bn_token` httpOnly cookie + JWT). Opening `/` or the installed app while still signed in goes to the dashboard. Logout clears the cookie. Keep `JWT_SECRET` stable across process restarts or existing sessions become invalid.
 
@@ -189,4 +189,4 @@ Keep the same `proxy_set_header` values the rest of the BossNote site already us
 4. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify and assignee DMs, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`, `LARK_OPEN_IDS` keyed by `boss-001`, `bayu-001`, `prista-001`, `sandra-001`). Enable bot scopes for group send, user DM (`im:message.p2p_msg:send_as_bot`), and email → open_id (`contact:user.id:readonly`). See **Lark group notify** for the Dupoin emails to resolve.
 5. Install the crontab line above
 6. Rebuild / restart (`npm run build && npm start` or your Oracle process manager)
-7. Installed PWAs pick up `bossnote-v8` after the next visit
+7. Installed PWAs pick up `bossnote-v9` after the next visit (the page reloads once when the new worker takes control)

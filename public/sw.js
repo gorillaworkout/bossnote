@@ -1,4 +1,4 @@
-const CACHE = 'bossnote-v8';
+const CACHE = 'bossnote-v9';
 const ASSETS = ['/logo.png'];
 
 self.addEventListener('install', (e) => {
@@ -23,13 +23,18 @@ self.addEventListener('fetch', (e) => {
   // Cache API only supports http(s). chrome-extension:// (and other schemes)
   // throw on Cache.put and show up as SW console noise.
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
-  // Network-only: never intercept /api/, document navigations, or the manifest.
-  // respondWith(fetch(request)) can drop cookies on media/Range GETs and some
-  // navigations → 401 / forced re-login when the PWA or tab is reopened.
-  // Leaving those requests unhandled keeps credentialed same-origin fetches intact.
+  // Network-only: never intercept /api/, document navigations, the manifest,
+  // the worker script, Next chunks, or RSC payloads. Cache-first on those
+  // pinned the previous dashboard after a deploy (stable ?_rsc= URLs and
+  // /_next/static scripts), so a status chip could update without the new
+  // column filter. respondWith(fetch(request)) can also drop cookies on
+  // media/Range GETs and some navigations → 401 / forced re-login.
   if (url.pathname.startsWith('/api/')) return;
   if (e.request.mode === 'navigate') return;
   if (url.pathname === '/manifest.json') return;
+  if (url.pathname === '/sw.js') return;
+  if (url.pathname.startsWith('/_next/')) return;
+  if (url.searchParams.has('_rsc')) return;
   e.respondWith((async () => {
     const match = await caches.match(e.request);
     if (match) return match;

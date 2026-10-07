@@ -11,11 +11,12 @@ const manifest = readFileSync(join(root, 'public/manifest.json'), 'utf8');
 const loginPage = readFileSync(join(root, 'src/app/page.tsx'), 'utf8');
 
 describe('service worker voice / API policy', () => {
-  it('bumps cache and registration to v8', () => {
-    assert.match(sw, /const CACHE = 'bossnote-v8'/);
-    assert.doesNotMatch(sw, /bossnote-v7/);
-    assert.match(layout, /\/sw\.js\?v=8/);
-    assert.doesNotMatch(layout, /\/sw\.js\?v=7/);
+  it('bumps cache and registration to v9', () => {
+    assert.match(sw, /const CACHE = 'bossnote-v9'/);
+    assert.doesNotMatch(sw, /bossnote-v8/);
+    assert.match(layout, /\/sw\.js\?v=9/);
+    assert.doesNotMatch(layout, /\/sw\.js\?v=8/);
+    assert.match(layout, /controllerchange/);
   });
 
   it('skips non-http(s) schemes and does not Cache.put failed fetches', () => {
@@ -34,6 +35,9 @@ describe('service worker voice / API policy', () => {
     assert.match(apiGuard, /if \(url\.pathname\.startsWith\('\/api\/'\)\) return;/);
     assert.match(apiGuard, /if \(e\.request\.mode === 'navigate'\) return;/);
     assert.match(apiGuard, /if \(url\.pathname === '\/manifest\.json'\) return;/);
+    assert.match(apiGuard, /if \(url\.pathname === '\/sw\.js'\) return;/);
+    assert.match(apiGuard, /if \(url\.pathname\.startsWith\('\/_next\/'\)\) return;/);
+    assert.match(apiGuard, /if \(url\.searchParams\.has\('_rsc'\)\) return;/);
     assert.doesNotMatch(apiGuard, /isAPI/);
     assert.doesNotMatch(apiGuard, /isNavigate/);
   });

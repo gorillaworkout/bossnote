@@ -29,6 +29,21 @@ describe('board shell', () => {
     assert.match(dashboard, /taskHiddenByFilters/);
   });
 
+  it('renders only the selected status column', () => {
+    const board = dashboard.slice(dashboard.indexOf('Desktop Kanban'), dashboard.indexOf('Mobile: tabbed'));
+    assert.match(board, /data-status-filter=\{filterStatus \|\| 'all'\}/);
+    assert.match(board, /if \(filterStatus && status !== filterStatus\) return null/);
+    assert.match(board, /data-status-column=\{status\}/);
+    assert.match(board, /filterStatus \? 'flex-1 min-w-0 w-full max-w-none/);
+    assert.match(board, /min-w-\[240px\] max-w-\[420px\]/);
+    assert.doesNotMatch(board, /TASK_STATUSES\.map/);
+  });
+
+  it('uses a plain empty state when a status filter matches nothing', () => {
+    const mobile = dashboard.slice(dashboard.indexOf('Mobile: tabbed'), dashboard.indexOf('Detail drawer'));
+    assert.match(mobile, /needsConfirmationOnly \? 'No tasks need confirmation' : 'No tasks'/);
+  });
+
   it('dedupes creates and keeps the question count off the status filter', () => {
     assert.match(dashboard, /client_token/);
     assert.match(dashboard, /needsConfirmationOnly \? pendingTasks : tasks/);
