@@ -1,7 +1,7 @@
 import webpush from 'web-push';
 import { v4 as uuidv4 } from 'uuid';
 import { execute, queryAll, queryOne } from '@/lib/database';
-import { buildDigestPayload, groupOpenTasksByAssignee, OPEN_TASK_STATUSES } from '@/lib/push-digest';
+import { buildDigestPayload, groupOpenTasksByAssignee, OPEN_TASK_STATUSES, visibleDigestTasks } from '@/lib/push-digest';
 import { uniqueSubscriptions } from '@/lib/push-targets';
 
 export { uniqueSubscriptions } from '@/lib/push-targets';
@@ -146,10 +146,24 @@ export async function sendDailyTaskDigests(): Promise<{
   removed: number;
 }> {
   const placeholders = OPEN_TASK_STATUSES.map(() => '?').join(', ');
-  const tasks = await queryAll<{ assignee_id: string; title: string; title_id: string | null }>(
-    `SELECT assignee_id, title, title_id FROM tasks
-     WHERE status IN (${placeholders})
-     ORDER BY created_at DESC`,
+  const tasks = await queryAll<{
+    assignee_id: string;
+    title: string;
+    title_id: string | null;
+    created_by: string;
+    creator_role: string;
+    creator_department_id: string | null;
+    assignee_role: string;
+    assignee_department_id: string | null;
+  }>(
+    `SELECT t.assignee_id, t.title, t.title_id, t.created_by,
+       cu.role AS creator_role, cu.department_id AS creator_department_id,
+       au.role AS assignee_role, au.department_id AS assignee_department_id
+     FROM tasks t
+     JOIN users au ON au.id = t.assignee_id
+     JOIN users cu ON cu.id = t.created_by
+     WHERE t.status IN (${placeholders})
+     ORDER BY t.created_at DESC`,
     [...OPEN_TASK_STATUSES],
   );
 
@@ -160,7 +174,12 @@ export async function sendDailyTaskDigests(): Promise<{
   let users = 0;
 
   for (const [userId, list] of groups) {
-    const payload = buildDigestPayload(list);
+    const first = list[0];
+    const visible = visibleDigestTasks(
+      { id: userId, role: first.assignee_role, department_id: first.assignee_department_id },
+      list,
+    );
+    const payload = buildDigestPayload(visible);
     if (!payload) {
       skipped += 1;
       continue;

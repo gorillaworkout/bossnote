@@ -1,3 +1,5 @@
+import { canViewTask, type TaskParties, type Viewer } from './task-access.ts';
+
 export const OPEN_TASK_STATUSES = ['todo', 'in_progress', 'waiting'] as const;
 
 export type DigestTask = {
@@ -12,8 +14,12 @@ export type DigestPayload = {
   url: string;
 };
 
-export function groupOpenTasksByAssignee(tasks: DigestTask[]): Map<string, DigestTask[]> {
-  const groups = new Map<string, DigestTask[]>();
+export function visibleDigestTasks<T extends DigestTask & TaskParties>(viewer: Viewer, tasks: T[]): T[] {
+  return tasks.filter((task) => task.assignee_id === viewer.id && canViewTask(viewer, task));
+}
+
+export function groupOpenTasksByAssignee<T extends DigestTask>(tasks: T[]): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
   for (const task of tasks) {
     if (!task.assignee_id) continue;
     const list = groups.get(task.assignee_id);

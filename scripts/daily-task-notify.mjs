@@ -4,6 +4,7 @@
 // Crontab (Asia/Jakarta, 10:00):
 //   0 10 * * * TZ=Asia/Jakarta cd /home/ubuntu/apps/bossnote && set -a && . ./.env && set +a && /usr/bin/node scripts/daily-task-notify.mjs >> /home/ubuntu/logs/bossnote-notify.log 2>&1
 import { Pool } from 'pg';
+import { visibleDigestTasks } from '../src/lib/push-digest.ts';
 import webpush from 'web-push';
 import fs from 'fs';
 import path from 'path';
@@ -97,9 +98,14 @@ async function main() {
   const client = await pool.connect();
   try {
     const { rows: tasks } = await client.query(
-      `SELECT assignee_id, title, title_id FROM tasks
-       WHERE status = ANY($1::text[])
-       ORDER BY created_at DESC`,
+      `SELECT t.assignee_id, t.title, t.title_id, t.created_by,
+         cu.role AS creator_role, cu.department_id AS creator_department_id,
+         au.role AS assignee_role, au.department_id AS assignee_department_id
+       FROM tasks t
+       JOIN users au ON au.id = t.assignee_id
+       JOIN users cu ON cu.id = t.created_by
+       WHERE t.status = ANY($1::text[])
+       ORDER BY t.created_at DESC`,
       [OPEN],
     );
 
@@ -117,7 +123,12 @@ async function main() {
     let removed = 0;
 
     for (const [userId, list] of groups) {
-      const payload = buildDigest(list);
+      const first = list[0];
+      const visible = visibleDigestTasks(
+        { id: userId, role: first.assignee_role, department_id: first.assignee_department_id },
+        list,
+      );
+      const payload = buildDigest(visible);
       if (!payload) {
         skipped += 1;
         continue;
