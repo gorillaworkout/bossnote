@@ -3,11 +3,14 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { homePathForRole } from '@/lib/home-path';
+import { larkLoginErrorSentence } from '@/lib/lark-login-messages';
 
-export function LoginForm() {
+export function LoginForm({ larkError = '' }: { larkError?: string }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const larkMessage = larkLoginErrorSentence(larkError);
+  const shownError = error || larkMessage;
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -47,7 +50,8 @@ export function LoginForm() {
           <p className="text-[13px] text-zinc-500 mt-1">Sign in to continue</p>
         </div>
 
-        <form onSubmit={handleLogin} noValidate className="card p-5 space-y-4">
+        <div className="card p-5">
+        <form onSubmit={handleLogin} noValidate className="space-y-4">
           <div>
             <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Username</label>
             <input
@@ -68,7 +72,7 @@ export function LoginForm() {
               className="input-field w-full px-3.5 py-2.5 text-[14px]"
             />
           </div>
-          {error && <p className="text-[12px] text-red-400 bg-red-950/30 border border-red-900/30 rounded-md px-3 py-2">{error}</p>}
+          {shownError && <p className="text-[12px] text-red-400 bg-red-950/30 border border-red-900/30 rounded-md px-3 py-2">{shownError}</p>}
           <button
             type="submit"
             disabled={loading}
@@ -77,6 +81,18 @@ export function LoginForm() {
             {loading ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
+        <div className="flex items-center gap-3 my-4 text-[12px] text-zinc-500">
+          <span className="h-px flex-1 bg-[var(--border)]" />
+          or
+          <span className="h-px flex-1 bg-[var(--border)]" />
+        </div>
+        <a
+          href="/api/auth/lark/start"
+          className="block w-full text-center border border-[var(--border)] hover:border-zinc-500 text-zinc-200 font-medium py-2.5 rounded-lg text-[13px] transition-colors"
+        >
+          Login with Lark
+        </a>
+        </div>
       </div>
     </div>
   );

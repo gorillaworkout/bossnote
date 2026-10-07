@@ -107,6 +107,19 @@ Either one is checked before the contact API, so the DM still works if the conta
 
 If any required Lark var is missing, create/reassign still succeeds; Lark is skipped (one warning log). The custom app bot must be in the group and allowed to send messages (`im:message` or `im:message:send_as_bot`, and the group-send scope if the app uses granular permissions). Personal DMs also need permission to message a user, typically `im:message.p2p_msg:send_as_bot`, and the assignee must be in the app’s availability. A DM can still fail if that person has never opened a chat with the bot; BossNote logs it and continues.
 
+## Lark login
+
+Username and password stay on `/`. **Login with Lark** is a second way in, on the same card. It uses the existing custom app (`LARK_APP_ID` / `LARK_APP_SECRET`). Do not create a second app, and do not commit the app secret or the tenant key.
+
+In that app’s Lark console:
+
+1. Security settings, Redirect URLs: add `https://bossnote.gorillaworkout.id/api/auth/lark/callback` with no trailing slash. If `LARK_REDIRECT_URI` is set to something else, add that exact URL too.
+2. Permissions: enable the user identity scope `contact:user.email:readonly`. Do not enable `offline_access` for this login.
+3. Publish a version so the redirect URL and scope are in the released version.
+4. Copy the company tenant key into `LARK_TENANT_KEY` (`data.tenant_key` from Get User Information). Leave it empty to disable the button’s start route.
+
+`LARK_REDIRECT_URI` is optional. When it is unset, the callback is `{BOSSNOTE_URL|APP_URL|NEXT_PUBLIC_APP_URL}/api/auth/lark/callback`. Missing `LARK_CHAT_ID` does not disable login. A first Lark sign-in creates a new Staff user with no department. It does not attach to Ian, Prista, Bayu, or Sandra. The admin account stays password-only. Apply `migrations/012_lark_login.sql` before relying on the new columns.
+
 ## Daily digest cron (Oracle, Asia/Jakarta)
 
 Applies `migrations/007_push_subscriptions.sql`, then:
@@ -185,7 +198,7 @@ Keep the same `proxy_set_header` values the rest of the BossNote site already us
 
 1. `npm i`
 2. Apply `migrations/007_push_subscriptions.sql`, `migrations/008_lark_open_id.sql`, `migrations/009_task_image.sql`, and `migrations/010_task_images.sql`
-3. Apply `migrations/011_departments.sql` with the other migrations. It seeds the `General` department and assigns existing bosses and staff to it. It does not create the admin login.
+3. Apply `migrations/011_departments.sql` and `migrations/012_lark_login.sql` with the other migrations. `011` seeds the `General` department and assigns existing bosses and staff to it. It does not create the admin login. `012` allows a Staff user with no department and adds Lark login columns. It does not insert users or a tenant key.
 4. On the Oracle server `.env`, next to `JWT_SECRET` and the Lark variables, set `ADMIN_PASSWORD` (at least 6 characters). `ADMIN_NAME` is optional; a blank name becomes `Admin` and the derived email is `admin@bossnote.id`.
 5. From the app directory, with that env loaded: `node --experimental-strip-types scripts/seed-admin.mjs`. Run it after the migration. Running it again updates the admin password hash and leaves Ian, Bayu, Sandra, and Prista unchanged.
 6. Do not commit `ADMIN_PASSWORD` or the hash. `.env.example` keeps both admin variables empty.

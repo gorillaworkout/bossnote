@@ -1,3 +1,4 @@
+import { normalizeLarkOpenId } from './lark.ts';
 import { ADMIN_USER_ID } from './roles.ts';
 
 export const DEPARTMENT_IN_USE_ERROR =
@@ -64,16 +65,44 @@ export function validateUpdateUser(input: {
   }
 
   if (roleSent && !nextRole) return { ok: false, status: 400, error: 'Role must be Boss or Staff' };
-  if (departmentSent && !nextDepartment) {
-    return { ok: false, status: 400, error: 'A boss or staff account needs a department' };
+
+  const currentRole = input.target.role === 'boss' || input.target.role === 'member' ? input.target.role : null;
+  const resultingRole = nextRole ?? currentRole;
+  const resultingDepartment = departmentSent ? (nextDepartment || null) : input.target.department_id;
+  if (resultingRole === 'boss' && !resultingDepartment) {
+    return { ok: false, status: 400, error: 'A boss account needs a department.' };
   }
+
   return {
     ok: true,
     name,
     role: nextRole,
-    department_id: departmentSent ? nextDepartment : input.target.department_id,
+    department_id: resultingDepartment,
     lark_open_id: larkField(input.body.lark_open_id),
   };
+}
+
+export function resolveLarkOpenIdChange(input: {
+  role: string;
+  authProvider: string;
+  stored: string | null;
+  incoming: string | null | undefined;
+}): { ok: true; next: string | null } | { ok: false; status: 400; error: string } {
+  if (input.incoming === undefined) return { ok: true, next: input.stored };
+  const trimmed = input.incoming === null ? '' : input.incoming.trim();
+  if (trimmed === (input.stored ?? '')) return { ok: true, next: input.stored };
+
+  if (input.role === 'admin') {
+    if (!trimmed) return { ok: true, next: null };
+    return { ok: false, status: 400, error: 'The admin account cannot use Lark sign-in.' };
+  }
+  if (input.authProvider === 'lark') {
+    return { ok: false, status: 400, error: 'Lark sign-in id cannot be changed.' };
+  }
+  if (!trimmed) return { ok: true, next: null };
+  const normalized = normalizeLarkOpenId(trimmed);
+  if (!normalized) return { ok: false, status: 400, error: 'Lark Open ID looks invalid' };
+  return { ok: true, next: normalized };
 }
 
 function larkField(value: unknown): string | null | undefined {

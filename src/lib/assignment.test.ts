@@ -8,6 +8,7 @@ import {
   decideCreateAssignee,
   decideReassign,
   isValidAssignmentPair,
+  NO_DEPARTMENT_CREATE_ERROR,
   type Party,
 } from './assignment.ts';
 
@@ -54,6 +55,11 @@ describe('assignment pairs', () => {
     assert.match(listed.sql, /department_id = \?/);
     assert.deepEqual(listed.values, ['member', general]);
     assert.equal(candidateListQuery(admin), null);
+    const waiting = party('lark-1', 'Nia Lark', 'member', null);
+    assert.deepEqual(candidatesFor(waiting, [ian, bayu, sandra]), []);
+    assert.equal(candidateListQuery(waiting), null);
+    assert.equal(isValidAssignmentPair(waiting, ian), false);
+    assert.equal(isValidAssignmentPair(ian, waiting), false);
   });
 });
 
@@ -62,6 +68,7 @@ describe('decideCreateAssignee', () => {
     assert.deepEqual(
       decideCreateAssignee({
         creatorRole: 'member',
+        creatorDepartmentId: general,
         candidates: [],
         knownUserIds: [],
         formAssigneeId: '',
@@ -89,6 +96,23 @@ describe('decideCreateAssignee', () => {
         status: 400,
         code: 'no_assignee_available',
         error: 'No staff in your department to assign.',
+      },
+    );
+    assert.deepEqual(
+      decideCreateAssignee({
+        creatorRole: 'member',
+        creatorDepartmentId: null,
+        candidates: [],
+        knownUserIds: [],
+        formAssigneeId: '',
+        hint: null,
+        typed: true,
+      }),
+      {
+        ok: false,
+        status: 400,
+        code: 'no_assignee_available',
+        error: NO_DEPARTMENT_CREATE_ERROR,
       },
     );
   });

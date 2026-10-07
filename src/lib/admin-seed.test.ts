@@ -39,6 +39,8 @@ describe('seed script source', () => {
     assert.match(script, /ON CONFLICT \(id\) DO UPDATE/);
     assert.match(script, /department_id = NULL/);
     assert.match(script, /role = 'admin'/);
+    assert.match(script, /auth_provider = 'password'/);
+    assert.equal(script.includes('lark_open_id'), false);
     assert.equal(script.includes('console.log') && script.includes('ADMIN_PASSWORD'), false);
     assert.equal(/\$2[aby]\$/.test(script), false);
   });

@@ -5,6 +5,7 @@ import {
   DEPARTMENT_IN_USE_ERROR,
   deleteUserBlock,
   normalizeDepartmentName,
+  resolveLarkOpenIdChange,
   validateCreateUser,
   validateUpdateUser,
 } from './managed-user.ts';
@@ -46,7 +47,20 @@ describe('validateUpdateUser', () => {
       target: bayu,
       body: { name: 'Bayu', role: 'member', department_id: '' },
     });
-    assert.equal(cleared.ok, false);
+    assert.deepEqual(cleared, {
+      ok: true,
+      name: 'Bayu',
+      role: 'member',
+      department_id: null,
+      lark_open_id: undefined,
+    });
+
+    const bossCleared = validateUpdateUser({
+      actorId: ADMIN_USER_ID,
+      target: { ...bayu, role: 'boss' },
+      body: { name: 'Bayu', role: 'boss', department_id: '' },
+    });
+    assert.deepEqual(bossCleared, { ok: false, status: 400, error: 'A boss account needs a department.' });
 
     const moved = validateUpdateUser({
       actorId: ADMIN_USER_ID,
@@ -60,6 +74,51 @@ describe('validateUpdateUser', () => {
       department_id: 'dept-sales',
       lark_open_id: undefined,
     });
+  });
+});
+
+describe('resolveLarkOpenIdChange', () => {
+  it('keeps a repeated id, clears only the admin, and locks a Lark login id', () => {
+    assert.deepEqual(
+      resolveLarkOpenIdChange({ role: 'admin', authProvider: 'password', stored: 'ou_admin1', incoming: undefined }),
+      { ok: true, next: 'ou_admin1' },
+    );
+    assert.deepEqual(
+      resolveLarkOpenIdChange({ role: 'admin', authProvider: 'password', stored: 'ou_admin1', incoming: ' ou_admin1 ' }),
+      { ok: true, next: 'ou_admin1' },
+    );
+    assert.deepEqual(
+      resolveLarkOpenIdChange({ role: 'admin', authProvider: 'password', stored: 'ou_admin1', incoming: '' }),
+      { ok: true, next: null },
+    );
+    assert.deepEqual(
+      resolveLarkOpenIdChange({ role: 'admin', authProvider: 'password', stored: null, incoming: 'ou_other1' }),
+      { ok: false, status: 400, error: 'The admin account cannot use Lark sign-in.' },
+    );
+    assert.deepEqual(
+      resolveLarkOpenIdChange({ role: 'member', authProvider: 'lark', stored: 'ou_lark01', incoming: 'ou_other1' }),
+      { ok: false, status: 400, error: 'Lark sign-in id cannot be changed.' },
+    );
+    assert.deepEqual(
+      resolveLarkOpenIdChange({ role: 'member', authProvider: 'lark', stored: 'ou_lark01', incoming: '' }),
+      { ok: false, status: 400, error: 'Lark sign-in id cannot be changed.' },
+    );
+    assert.deepEqual(
+      resolveLarkOpenIdChange({ role: 'member', authProvider: 'lark', stored: 'ou_lark01', incoming: 'ou_lark01' }),
+      { ok: true, next: 'ou_lark01' },
+    );
+    assert.deepEqual(
+      resolveLarkOpenIdChange({ role: 'member', authProvider: 'password', stored: null, incoming: '' }),
+      { ok: true, next: null },
+    );
+    assert.deepEqual(
+      resolveLarkOpenIdChange({ role: 'member', authProvider: 'password', stored: null, incoming: 'ou_bayu01' }),
+      { ok: true, next: 'ou_bayu01' },
+    );
+    assert.equal(
+      resolveLarkOpenIdChange({ role: 'member', authProvider: 'password', stored: null, incoming: 'no' }).ok,
+      false,
+    );
   });
 });
 

@@ -32,7 +32,7 @@ import { TASK_STATUSES, type TaskStatus } from '@/lib/task-status';
 
 /* ── Types ── */
 
-interface User { id: string; name: string; role: string }
+interface User { id: string; name: string; role: string; department_id?: string | null }
 interface Task {
   id: string; title: string; title_id: string | null; description: string;
   priority: string; status: string;
@@ -1086,6 +1086,12 @@ export default function TaskBoard() {
 
       <PushEnableBanner />
 
+      {user.role === 'member' && !user.department_id && (
+        <div className="bg-amber-950/40 border-b border-amber-900/40 text-amber-200 text-[12px] px-4 py-2 flex-shrink-0">
+          An admin has not assigned your department yet. You can sign in, but you cannot create or receive tasks until then.
+        </div>
+      )}
+
       {/* ═══════ BANNERS ═══════ */}
       {processing && <div className="h-8 bg-violet-950/40 border-b border-violet-800/40 text-violet-300 text-[12px] flex items-center justify-center gap-2 flex-shrink-0"><Spinner />{imageProgress !== null ? `Uploading photo… ${imageProgress}%` : showNewTask || needAssignee ? 'Creating…' : createMode === 'typed' ? 'Saving reminder…' : 'Processing voice note…'}</div>}
       {error && <div className="bg-[var(--danger-soft)] border-b border-red-900/30 text-red-400 text-[12px] flex items-center px-4 py-2 flex-shrink-0"><AlertIcon /><span className="flex-1 ml-2">{error}</span><button onClick={() => setError(null)} className="text-red-500/70 hover:text-red-400 ml-3">Dismiss</button></div>}
@@ -1283,7 +1289,7 @@ export default function TaskBoard() {
                 </div>
                 <div className="text-left mb-3">
                   <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Assign to (optional)</label>
-                  <AssigneeSelect users={createUsers} value={assigneeId} onChange={setAssigneeId} includeAuto autoLabel="Auto from voice" disabled={processing} emptyMessage={noAssigneeAvailableMessage(user.role)} />
+                  <AssigneeSelect users={createUsers} value={assigneeId} onChange={setAssigneeId} includeAuto autoLabel="Auto from voice" disabled={processing} emptyMessage={noAssigneeAvailableMessage(user.role, user.department_id ?? null)} />
                   <p className="text-[11px] text-zinc-600 mt-1.5 leading-relaxed">Optional. If the voice note does not name anyone, we will ask who it is for. Boss accounts are listed under Boss.</p>
                 </div>
                 <TaskImageField previews={imagePreviews} error={imageError} progress={imageProgress} disabled={processing} onFiles={(files) => { void onPickImages(files); }} onRemove={removeDraftImage} />
@@ -1316,7 +1322,7 @@ export default function TaskBoard() {
                 </div>
                 <div>
                   <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Assign to</label>
-                  <AssigneeSelect users={createUsers} value={assigneeId} onChange={setAssigneeId} disabled={processing} emptyMessage={noAssigneeAvailableMessage(user.role)} />
+                  <AssigneeSelect users={createUsers} value={assigneeId} onChange={setAssigneeId} disabled={processing} emptyMessage={noAssigneeAvailableMessage(user.role, user.department_id ?? null)} />
                 </div>
                 <TaskImageField previews={imagePreviews} error={imageError} progress={imageProgress} disabled={processing} onFiles={(files) => { void onPickImages(files); }} onRemove={removeDraftImage} />
                 <div className="grid grid-cols-2 gap-2">
@@ -1347,7 +1353,7 @@ export default function TaskBoard() {
           busy={processing}
           onPick={(id) => { void createTask(id); }}
           onBack={() => setNeedAssignee(false)}
-          emptyMessage={noAssigneeAvailableMessage(user.role)}
+          emptyMessage={noAssigneeAvailableMessage(user.role, user.department_id ?? null)}
         />
       )}
 

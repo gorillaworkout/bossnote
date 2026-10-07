@@ -12,6 +12,8 @@ interface User {
   department_id: string | null;
   department_name: string | null;
   lark_open_id?: string | null;
+  lark_email?: string | null;
+  auth_provider?: string | null;
   created_at: string;
 }
 
@@ -122,6 +124,10 @@ export default function ManageUsersPage() {
   const saveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editing) return;
+    if (editing.role !== 'admin' && editRole === 'boss' && !editDepartment) {
+      setMsg({ ok: false, text: 'A boss account needs a department.' });
+      return;
+    }
     setBusy(true); setMsg(null);
     try {
       const body: { name: string; lark_open_id: string; role?: string; department_id?: string } = {
@@ -194,7 +200,7 @@ export default function ManageUsersPage() {
       <main className="flex-1 max-w-[760px] w-full mx-auto p-5 space-y-5">
         <div>
           <h2 className="text-[15px] font-semibold text-zinc-100">Manage Users</h2>
-          <p className="text-[12px] text-zinc-500 mt-0.5">The admin creates each person, picks Boss or Staff, and places them in a department.</p>
+          <p className="text-[12px] text-zinc-500 mt-0.5">The admin creates each person, picks Boss or Staff, and places them in a department. People who use Login with Lark appear here after their first sign-in, as Staff with no department. Assign a department before they can create or receive tasks.</p>
         </div>
 
         {msg && (
@@ -256,9 +262,13 @@ export default function ManageUsersPage() {
                       <span className="text-[13px] font-medium text-zinc-200">{u.name}</span>
                       {u.id === me.id && <span className="text-[10px] text-zinc-600">(you)</span>}
                       {roleBadge(u.role)}
+                      {u.auth_provider === 'lark' && (
+                        <span className="px-2 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wider bg-sky-950/50 text-sky-300">Lark</span>
+                      )}
                     </div>
                     <p className="text-[11px] text-zinc-600 truncate">{u.department_name || 'No department'}</p>
                     <p className="text-[11px] text-zinc-600 truncate">{u.email}</p>
+                    {u.lark_email && <p className="text-[11px] text-zinc-600 truncate">{u.lark_email}</p>}
                     <p className="text-[10px] text-zinc-700 mt-0.5">
                       Created {fmtCreated(u.created_at)}
                       {u.lark_open_id ? ' · Lark mention ready' : ''}
@@ -333,9 +343,10 @@ export default function ManageUsersPage() {
                     <select
                       value={editDepartment}
                       onChange={e => setEditDepartment(e.target.value)}
-                      required
+                      required={editRole === 'boss'}
                       className="input-field w-full px-3 py-2.5 text-[14px] cursor-pointer"
                     >
+                      {editRole === 'member' && <option value="">No department</option>}
                       {departments.map((department) => (
                         <option key={department.id} value={department.id}>{department.name}</option>
                       ))}
@@ -345,8 +356,22 @@ export default function ManageUsersPage() {
               )}
               <div>
                 <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Lark Open ID (optional)</label>
-                <input type="text" value={editLarkOpenId} onChange={e => setEditLarkOpenId(e.target.value)} placeholder="ou_…" autoComplete="off" className="input-field w-full px-3 py-2.5 text-[14px]" />
-                <p className="text-[11px] text-zinc-600 mt-1.5">Used to @mention this person in the Lark group. Leave blank to look up by name.</p>
+                <input
+                  type="text"
+                  value={editLarkOpenId}
+                  onChange={e => setEditLarkOpenId(e.target.value)}
+                  placeholder="ou_…"
+                  autoComplete="off"
+                  readOnly={editing.auth_provider === 'lark'}
+                  className="input-field w-full px-3 py-2.5 text-[14px] read-only:text-zinc-500"
+                />
+                {editing.role === 'admin' ? (
+                  <p className="text-[11px] text-zinc-600 mt-1.5">This account cannot sign in with Lark.</p>
+                ) : editing.auth_provider === 'lark' ? (
+                  <p className="text-[11px] text-zinc-600 mt-1.5">This id is how Login with Lark finds this person. It cannot be changed.</p>
+                ) : (
+                  <p className="text-[11px] text-zinc-600 mt-1.5">Used to @mention this person in the Lark group. Leave blank to look up by name.</p>
+                )}
               </div>
               <div className="flex gap-2.5 pt-2">
                 <button type="button" onClick={() => setEditing(null)} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[13px] font-medium py-2 rounded-lg transition-colors">Cancel</button>

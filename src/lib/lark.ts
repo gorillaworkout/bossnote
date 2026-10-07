@@ -219,6 +219,11 @@ function normalizeEmail(value: unknown): string | null {
   return email;
 }
 
+/** Lark mailbox stored on `users.lark_email`. Same shape as directory-email lookup. */
+export function normalizeLarkDirectoryEmail(value: unknown): string | null {
+  return normalizeEmail(value);
+}
+
 /**
  * Parse an assignee → directory-email map. Same shapes as LARK_OPEN_IDS:
  * JSON `{"boss-001":"ian@dupoin.com"}` or `boss-001:ian@dupoin.com,Bayu=bayu@dupoin.co.id`.
