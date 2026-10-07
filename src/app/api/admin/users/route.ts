@@ -1,62 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession } from '@/lib/auth';
-import { queryAll, queryOne, execute } from '@/lib/database';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
+import { getSession } from '@/lib/auth';
+import { execute, queryAll, queryOne } from '@/lib/database';
 import { DEFAULT_AUDIO_MODEL } from '@/lib/ai';
+import { deriveLoginEmail } from '@/lib/admin-seed';
+import { validateCreateUser } from '@/lib/managed-user';
+import { requireAdmin } from '@/lib/require-admin';
 
-const MIN_LEN = 6;
-
-function requireBoss(user: { id: string; role: string } | null) {
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (user.role !== 'boss') return NextResponse.json({ error: 'Only a boss can manage users' }, { status: 403 });
-  return null;
-}
+const USER_LIST_SQL = `SELECT u.id, u.email, u.name, u.role, u.department_id, d.name AS department_name,
+       u.lark_open_id, u.created_at
+FROM users u
+LEFT JOIN departments d ON d.id = u.department_id
+ORDER BY LOWER(u.name)`;
 
 export async function GET() {
-  const user = await getSession();
-  const denied = requireBoss(user);
+  const denied = requireAdmin(await getSession(), 'Only an admin can manage users');
   if (denied) return denied;
 
-  const users = await queryAll(
-    'SELECT id, email, name, role, lark_open_id, created_at FROM users ORDER BY LOWER(name)',
-  );
+  const users = await queryAll(USER_LIST_SQL);
   return NextResponse.json({ users });
 }
 
 export async function POST(request: NextRequest) {
-  const user = await getSession();
-  const denied = requireBoss(user);
+  const denied = requireAdmin(await getSession(), 'Only an admin can manage users');
   if (denied) return denied;
 
-  const { name, password, role } = (await request.json()) as {
-    name?: string;
-    password?: string;
-    role?: string;
+  const body = (await request.json().catch(() => ({}))) as {
+    name?: unknown;
+    password?: unknown;
+    role?: unknown;
+    department_id?: unknown;
   };
-  const cleanName = typeof name === 'string' ? name.trim() : '';
-  if (!cleanName) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
-  if (cleanName.length > 60) return NextResponse.json({ error: 'Name is too long' }, { status: 400 });
-  if (!password || String(password).length < MIN_LEN) {
-    return NextResponse.json({ error: `Password must be at least ${MIN_LEN} characters` }, { status: 400 });
-  }
-  const cleanRole = role === 'boss' ? 'boss' : 'member';
+  const parsed = validateCreateUser(body);
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: parsed.status });
 
-  // Login is by name (case-insensitive) — enforce uniqueness.
-  const existing = await queryOne('SELECT id FROM users WHERE LOWER(name) = LOWER(?)', [cleanName]);
+  const department = await queryOne('SELECT id FROM departments WHERE id = ?', [parsed.department_id]);
+  if (!department) return NextResponse.json({ error: 'Department not found' }, { status: 400 });
+
+  const existing = await queryOne('SELECT id FROM users WHERE LOWER(name) = LOWER(?)', [parsed.name]);
   if (existing) return NextResponse.json({ error: 'That name is already taken' }, { status: 409 });
 
-  // email is UNIQUE NOT NULL but unused for login; derive a safe value.
-  const base = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
-  let email = `${base}@bossnote.id`;
-  const emailTaken = await queryOne('SELECT id FROM users WHERE email = ?', [email]);
-  if (emailTaken) email = `${base}-${Date.now().toString(36)}@bossnote.id`;
+  const baseEmail = deriveLoginEmail(parsed.name, false);
+  const emailTaken = await queryOne('SELECT id FROM users WHERE email = ?', [baseEmail]);
+  const email = deriveLoginEmail(parsed.name, Boolean(emailTaken));
 
   const id = uuidv4();
-  const hash = bcrypt.hashSync(String(password), 10);
+  const hash = bcrypt.hashSync(parsed.password, 10);
   await execute(
-    'INSERT INTO users (id, email, name, password_hash, role) VALUES (?, ?, ?, ?, ?)',
-    [id, email, cleanName, hash, cleanRole],
+    'INSERT INTO users (id, email, name, password_hash, role, department_id) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, email, parsed.name, hash, parsed.role, parsed.department_id],
   );
   await execute(
     'INSERT INTO user_settings (user_id, ai_model) VALUES (?, ?)',
@@ -64,7 +57,16 @@ export async function POST(request: NextRequest) {
   );
 
   return NextResponse.json(
-    { user: { id, email, name: cleanName, role: cleanRole }, ok: true },
+    {
+      user: {
+        id,
+        email,
+        name: parsed.name,
+        role: parsed.role,
+        department_id: parsed.department_id,
+      },
+      ok: true,
+    },
     { status: 201 },
   );
 }
