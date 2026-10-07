@@ -47,7 +47,8 @@ describe('login session restore', () => {
   it('starts the PWA on the dashboard and redirects / when a session exists', () => {
     assert.match(manifest, /"start_url":\s*"\/dashboard"/);
     assert.match(loginPage, /getSession\(\)/);
-    assert.match(loginPage, /redirect\('\/dashboard'\)/);
+    assert.match(loginPage, /homePathForRole\(user\.role\)/);
+    assert.match(loginPage, /redirect\(homePathForRole\(user\.role\)\)/);
     assert.match(loginPage, /export const dynamic = 'force-dynamic'/);
   });
 });
