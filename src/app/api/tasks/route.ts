@@ -19,6 +19,12 @@ import { sendPushToUser } from '@/lib/push';
 import { notifyLarkTask } from '@/lib/lark';
 import { assignmentPushUrl } from '@/lib/task-access';
 import { buildTaskListQuery } from '@/lib/task-list-scope';
+import { dedupeTasksById } from '@/lib/task-board';
+import {
+  beginCreateClaim,
+  completeCreateClaim,
+  releaseCreateClaim,
+} from '@/lib/create-idempotency';
 import { saveVoice, voiceExt } from '@/lib/voice-storage';
 import { publishTaskListChange } from '@/lib/task-live';
 import { v4 as uuidv4 } from 'uuid';
@@ -36,7 +42,7 @@ export async function GET(request: NextRequest) {
     search: searchParams.get('search'),
   });
 
-  const tasks = await queryAll(sql, values);
+  const tasks = dedupeTasksById(await queryAll<{ id: string }>(sql, values));
   return NextResponse.json({ tasks });
 }
 
@@ -50,7 +56,13 @@ type CreateInput = {
   modelRaw: string;
   voiceDurationRaw: string;
   confirmUnclear: boolean;
+  clientToken: string;
 };
+
+function readClientToken(value: unknown): string {
+  const token = typeof value === 'string' ? value.trim() : '';
+  return /^[A-Za-z0-9_-]{8,80}$/.test(token) ? token : '';
+}
 
 async function readCreateInput(request: NextRequest): Promise<CreateInput> {
   const contentType = request.headers.get('content-type') || '';
@@ -66,6 +78,7 @@ async function readCreateInput(request: NextRequest): Promise<CreateInput> {
       modelRaw: String(body.model ?? ''),
       voiceDurationRaw: '',
       confirmUnclear: parseConfirmUnclearFlag(body.confirm_unclear),
+      clientToken: readClientToken(body.client_token),
     };
   }
 
@@ -82,6 +95,7 @@ async function readCreateInput(request: NextRequest): Promise<CreateInput> {
     modelRaw: String(formData.get('model') ?? ''),
     voiceDurationRaw: String(formData.get('voice_duration') ?? ''),
     confirmUnclear: parseConfirmUnclearFlag(formData.get('confirm_unclear')),
+    clientToken: readClientToken(formData.get('client_token')),
   };
 }
 
@@ -132,6 +146,36 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const input = await readCreateInput(request);
+  const claim = beginCreateClaim(user.id, input.clientToken);
+  if (claim.status === 'replay') {
+    const existing = await loadCreatedTask(claim.taskId);
+    if (existing) return NextResponse.json({ task: existing, ai_error: null, ok: true });
+    releaseCreateClaim(user.id, input.clientToken);
+  } else if (claim.status === 'in_flight') {
+    return NextResponse.json({ error: 'This task is already being created' }, { status: 409 });
+  }
+
+  let committed = false;
+  const releaseClaim = () => {
+    if (!committed) releaseCreateClaim(user.id, input.clientToken);
+  };
+  const commitClaim = (taskId: string) => {
+    committed = true;
+    completeCreateClaim(user.id, input.clientToken, taskId);
+  };
+
+  try {
+    return await createTaskForUser(user, input, commitClaim);
+  } finally {
+    releaseClaim();
+  }
+}
+
+async function createTaskForUser(
+  user: { id: string; name: string },
+  input: CreateInput,
+  commitClaim: (taskId: string) => void,
+) {
   const team = await queryAll<{ id: string; email: string; name: string; lark_open_id: string | null }>(
     'SELECT id, email, name, lark_open_id FROM users ORDER BY name',
   );
@@ -193,6 +237,7 @@ export async function POST(request: NextRequest) {
 
     const task = await loadCreatedTask(taskId);
     publishTaskListChange();
+    commitClaim(taskId);
     notifyAssignee(formUser.id, fields.title || fields.title_id, taskId, {
       assigneeName: formUser.name,
       assigneeOpenId: formUser.lark_open_id,
@@ -282,6 +327,7 @@ export async function POST(request: NextRequest) {
   const task = await loadCreatedTask(taskId);
   const assigneeName = assignee.name;
   publishTaskListChange();
+  commitClaim(taskId);
   notifyAssignee(assigneeId, title || titleId, taskId, {
     assigneeName,
     assigneeOpenId: assignee.lark_open_id,
@@ -292,3 +338,4 @@ export async function POST(request: NextRequest) {
   });
   return NextResponse.json({ task, ai_error: null, ok: true }, { status: 201 });
 }
+

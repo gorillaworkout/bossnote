@@ -48,7 +48,9 @@ describe('status buttons', () => {
   it('filters the toolbar by status with buttons instead of a dropdown', () => {
     const toolbar = sliceBetween(dashboard, 'TOOLBAR', 'BODY');
     assert.match(dashboard, /import \{ StatusFilter \} from '@\/components\/StatusFilter'/);
-    assert.match(toolbar, /<StatusFilter value=\{filterStatus\} onChange=\{setFilterStatus\} \/>/);
+    assert.match(toolbar, /<StatusFilter value=\{filterStatus\}/);
+    assert.match(toolbar, /setFilterStatus\(status\)/);
+    assert.match(toolbar, /taskHiddenByFilters/);
     assert.match(toolbar, /<select value=\{filterAssignee\}/);
     assert.doesNotMatch(toolbar, /<select value=\{filterStatus\}/);
     assert.doesNotMatch(toolbar, /All status/);
@@ -62,7 +64,9 @@ describe('status buttons', () => {
     assert.match(statusFilter, /bg-violet-600 text-white/);
     assert.match(statusFilter, /bg-zinc-900 text-zinc-400/);
     assert.doesNotMatch(statusFilter, /min-h-8|min-h-9|min-h-11|<select/);
-    assert.match(dashboard, /if \(filterStatus\) params\.set\('status', filterStatus\)/);
+    assert.match(dashboard, /boardColumns\(filterStatus\)/);
+    assert.doesNotMatch(dashboard, /params\.set\('status', filterStatus\)/);
+    assert.match(dashboard, /taskHiddenByFilters/);
   });
 
   it('still saves status with the existing task update request', () => {

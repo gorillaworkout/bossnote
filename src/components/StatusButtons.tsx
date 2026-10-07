@@ -33,7 +33,7 @@ export function StatusButtons({
       role="group"
       aria-label="Task status"
       onClick={(event) => event.stopPropagation()}
-      className="flex flex-wrap gap-1"
+      className="flex flex-nowrap gap-1"
     >
       {TASK_STATUSES.map((status) => {
         const active = value === status.value;
@@ -53,7 +53,7 @@ export function StatusButtons({
               'inline-flex items-center justify-center border font-medium leading-none transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/60',
               'disabled:cursor-wait',
-              compact ? 'h-6 px-1.5 text-[10px] rounded' : 'h-7 px-2 text-[11px] rounded-md',
+              compact ? 'h-6 px-1.5 text-[10px] rounded whitespace-nowrap shrink-0' : 'h-7 px-2 text-[11px] rounded-md whitespace-nowrap shrink-0',
               active ? ACTIVE[status.value] : IDLE[status.value],
               !active && disabled ? 'opacity-50' : '',
             ].join(' ')}
