@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { DashboardHeader } from '@/components/DashboardHeader';
 
@@ -54,7 +54,7 @@ export default function ManageUsersPage() {
 
   const router = useRouter();
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const [usersRes, deptRes] = await Promise.all([
       fetch('/api/admin/users', { credentials: 'include', cache: 'no-store' }),
       fetch('/api/admin/departments', { credentials: 'include', cache: 'no-store' }),
@@ -67,11 +67,10 @@ export default function ManageUsersPage() {
     } else {
       setUsers(d.users || []);
     }
-    setDepartments(departmentsBody.departments || []);
-    if (!newDepartment && departmentsBody.departments?.[0]?.id) {
-      setNewDepartment(departmentsBody.departments[0].id);
-    }
-  };
+    const nextDepartments: Department[] = departmentsBody.departments || [];
+    setDepartments(nextDepartments);
+    setNewDepartment((current) => current || nextDepartments[0]?.id || '');
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +93,7 @@ export default function ManageUsersPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [router]);
+  }, [router, load]);
 
   const addUser = async (e: React.FormEvent) => {
     e.preventDefault();

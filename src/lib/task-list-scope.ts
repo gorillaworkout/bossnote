@@ -65,7 +65,7 @@ export function buildTaskListQuery(input: {
 
   if (input.user.role === 'admin' || (!isBoss && !departmentId)) {
     conditions.push('FALSE');
-  } else if (!isBoss) {
+  } else if (!isBoss && departmentId) {
     const memberScope = scope ?? 'assigned';
     if (memberScope === 'assigned') {
       conditions.push("t.assignee_id = ? AND t.created_by <> ? AND bu.role = 'boss' AND bu.department_id = ?");

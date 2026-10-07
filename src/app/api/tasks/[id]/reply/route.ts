@@ -82,10 +82,14 @@ export async function POST(
       'SELECT questions, answered_questions FROM tasks WHERE id = ?',
       [id],
     );
-    const qs: string[] = (t?.questions && (t.questions as unknown as any[])?.length > 0)
-      ? t.questions as unknown as string[] : [];
-    const ans: number[] = (t?.answered_questions && (t.answered_questions as unknown as any[])?.length > 0)
-      ? t.answered_questions as unknown as number[] : [];
+    const rawQuestions: unknown = t?.questions;
+    const qs: string[] = Array.isArray(rawQuestions)
+      ? rawQuestions.filter((item): item is string => typeof item === 'string')
+      : [];
+    const rawAnswers: unknown = t?.answered_questions;
+    const ans: number[] = Array.isArray(rawAnswers)
+      ? rawAnswers.filter((item): item is number => typeof item === 'number')
+      : [];
 
     if (questionIndex < qs.length && !ans.includes(questionIndex)) {
       ans.push(questionIndex);
