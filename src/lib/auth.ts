@@ -43,7 +43,7 @@ export async function login(username: string, password: string): Promise<Session
     id: user.id,
     email: user.email,
     name: user.name,
-    role: user.role as 'boss' | 'member',
+    role: user.role,
   });
 }
 
@@ -53,10 +53,13 @@ export async function getUsers(): Promise<SessionUser[]> {
       'SELECT id, email, name, role FROM users ORDER BY name',
     ),
   );
-  return rows.map(r => toSessionUser({
-    id: r.id,
-    email: r.email,
-    name: r.name,
-    role: r.role as 'boss' | 'member',
-  }));
+  return rows.flatMap((r) => {
+    const user = toSessionUser({
+      id: r.id,
+      email: r.email,
+      name: r.name,
+      role: r.role,
+    });
+    return user ? [user] : [];
+  });
 }

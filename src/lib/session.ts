@@ -1,4 +1,5 @@
 import { SignJWT, jwtVerify } from 'jose';
+import { isAppRole, type AppRole } from './roles.ts';
 
 const COOKIE_NAME = 'bn_token';
 const SESSION_MAX_AGE = 60 * 60 * 24 * 90; // 90 days
@@ -8,7 +9,8 @@ export interface SessionUser {
   id: string;
   email: string;
   name: string;
-  role: 'boss' | 'member';
+  role: AppRole;
+  department_id: string | null;
 }
 
 export type SessionCookieOptions = {
@@ -34,12 +36,21 @@ export function jwtSecretBytes(): Uint8Array {
   return new TextEncoder().encode(raw);
 }
 
-export function toSessionUser(user: SessionUser): SessionUser {
+export function toSessionUser(user: {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  department_id?: string | null;
+}): SessionUser | null {
+  if (!isAppRole(user.role)) return null;
+  if (!user.id || !user.email || !user.name) return null;
   return {
     id: user.id,
     email: user.email,
     name: user.name,
-    role: user.role === 'boss' ? 'boss' : 'member',
+    role: user.role,
+    department_id: user.role === 'admin' ? null : (user.department_id ?? null),
   };
 }
 
@@ -62,8 +73,15 @@ export function clearSessionCookieOptions(): SessionCookieOptions {
   };
 }
 
-export async function createSession(user: SessionUser): Promise<string> {
+export async function createSession(user: {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  department_id?: string | null;
+}): Promise<string> {
   const session = toSessionUser(user);
+  if (!session) throw new Error('Unknown role');
   return new SignJWT({ ...session })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
@@ -77,7 +95,17 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
     if (typeof payload.id !== 'string' || typeof payload.email !== 'string' || typeof payload.name !== 'string') {
       return null;
     }
-    return toSessionUser(payload as unknown as SessionUser);
+    const role = typeof payload.role === 'string' ? payload.role : '';
+    const departmentId = typeof payload.department_id === 'string' || payload.department_id === null
+      ? payload.department_id
+      : null;
+    return toSessionUser({
+      id: payload.id,
+      email: payload.email,
+      name: payload.name,
+      role,
+      department_id: departmentId,
+    });
   } catch {
     return null;
   }
