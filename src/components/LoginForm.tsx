@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { homePathForRole } from '@/lib/home-path';
 
 export function LoginForm() {
   const [error, setError] = useState('');
@@ -28,7 +29,7 @@ export function LoginForm() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Login failed');
-      router.push('/dashboard');
+      router.push(homePathForRole(data.user?.role));
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');

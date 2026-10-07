@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const dashboard = readFileSync(join(root, 'src/app/dashboard/page.tsx'), 'utf8');
+const dashboard = readFileSync(join(root, 'src/components/TaskBoard.tsx'), 'utf8');
 const tasksRoute = readFileSync(join(root, 'src/app/api/tasks/route.ts'), 'utf8');
 const taskUpdateRoute = readFileSync(join(root, 'src/app/api/tasks/[id]/route.ts'), 'utf8');
 
@@ -46,18 +46,20 @@ describe('voice create assignee UX', () => {
   });
 
   it('prefers form assignee on the voice create API path', () => {
-    assert.match(tasksRoute, /resolveCreateAssignee\(input\.formAssigneeId, ai\?\.assignee_hint, team\)/);
+    assert.match(tasksRoute, /decideCreateAssignee\(/);
+    assert.doesNotMatch(tasksRoute, /resolveCreateAssignee\(/);
+    assert.match(tasksRoute, /candidateListQuery/);
     assert.match(tasksRoute, /ASSIGNEE_REQUIRED_CODE/);
     assert.doesNotMatch(tasksRoute, /fromVoice\?\.id \|\| formUser\?\.id/);
   });
 
   it('passes stored Lark open ids and assignee email into fire-and-forget notify', () => {
-    assert.match(tasksRoute, /SELECT id, email, name, lark_open_id FROM users/);
     assert.match(tasksRoute, /assigneeOpenId: formUser\.lark_open_id/);
     assert.match(tasksRoute, /assigneeEmail: formUser\.email/);
     assert.match(tasksRoute, /assigneeOpenId: assignee\.lark_open_id/);
     assert.match(tasksRoute, /assigneeEmail: assignee\.email/);
-    assert.match(taskUpdateRoute, /SELECT id, email, name, lark_open_id FROM users WHERE id = \?/);
+    assert.match(taskUpdateRoute, /SELECT id, name, role, department_id, email, lark_open_id FROM users WHERE id = \?/);
+    assert.match(taskUpdateRoute, /decideReassign/);
     assert.match(taskUpdateRoute, /assigneeEmail: assignee\.email/);
     assert.match(taskUpdateRoute, /kind: 'reassign'/);
   });

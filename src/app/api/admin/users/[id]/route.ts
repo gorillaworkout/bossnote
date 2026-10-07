@@ -1,62 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
-import { queryOne, execute } from '@/lib/database';
+import { execute, queryOne } from '@/lib/database';
 import { normalizeLarkOpenId } from '@/lib/lark';
+import { deleteUserBlock, validateUpdateUser } from '@/lib/managed-user';
+import { requireAdmin } from '@/lib/require-admin';
 
-function requireBoss(user: { id: string; role: string } | null) {
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (user.role !== 'boss') return NextResponse.json({ error: 'Only a boss can manage users' }, { status: 403 });
-  return null;
-}
+const USER_ROW_SQL = `SELECT u.id, u.email, u.name, u.role, u.department_id, d.name AS department_name,
+       u.lark_open_id, u.created_at
+FROM users u
+LEFT JOIN departments d ON d.id = u.department_id
+WHERE u.id = ?`;
 
-// Edit a user's name and/or role.
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const user = await getSession();
-  const denied = requireBoss(user);
-  if (denied) return denied;
+  const denied = requireAdmin(user, 'Only an admin can manage users');
+  if (denied || !user) return denied ?? NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const { name, role, lark_open_id } = (await request.json()) as {
-    name?: string;
-    role?: string;
-    lark_open_id?: string | null;
+  const body = (await request.json().catch(() => ({}))) as {
+    name?: unknown;
+    role?: unknown;
+    department_id?: unknown;
+    lark_open_id?: unknown;
   };
 
-  const target = await queryOne<{ id: string; name: string; role: string; lark_open_id: string | null }>(
-    'SELECT id, name, role, lark_open_id FROM users WHERE id = ?',
-    [id],
-  );
+  const target = await queryOne<{
+    id: string;
+    name: string;
+    role: string;
+    department_id: string | null;
+    lark_open_id: string | null;
+  }>('SELECT id, name, role, department_id, lark_open_id FROM users WHERE id = ?', [id]);
   if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-  const cleanName = typeof name === 'string' ? name.trim() : target.name;
-  if (!cleanName) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
-  if (cleanName.length > 60) return NextResponse.json({ error: 'Name is too long' }, { status: 400 });
+  const parsed = validateUpdateUser({ actorId: user.id, target, body });
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: parsed.status });
 
-  if (cleanName.toLowerCase() !== target.name.toLowerCase()) {
-    const existing = await queryOne('SELECT id FROM users WHERE LOWER(name) = LOWER(?) AND id <> ?', [cleanName, id]);
+  if (parsed.name.toLowerCase() !== target.name.toLowerCase()) {
+    const existing = await queryOne('SELECT id FROM users WHERE LOWER(name) = LOWER(?) AND id <> ?', [parsed.name, id]);
     if (existing) return NextResponse.json({ error: 'That name is already taken' }, { status: 409 });
   }
 
-  const cleanRole = role === 'boss' || role === 'member' ? role : null;
-
-  if (cleanRole === 'member' && target.id === user!.id) {
-    return NextResponse.json({ error: 'You cannot demote yourself' }, { status: 400 });
-  }
-  if (cleanRole === 'member' && target.role === 'boss') {
-    const bossCount = await queryOne<{ n: string }>(
-      "SELECT COUNT(*)::text AS n FROM users WHERE role = 'boss'",
-    );
-    if (Number(bossCount?.n ?? 0) <= 1) {
-      return NextResponse.json({ error: 'Cannot demote the last boss' }, { status: 400 });
-    }
+  if (target.role !== 'admin' && parsed.department_id) {
+    const department = await queryOne('SELECT id FROM departments WHERE id = ?', [parsed.department_id]);
+    if (!department) return NextResponse.json({ error: 'Department not found' }, { status: 400 });
   }
 
   let nextOpenId = target.lark_open_id;
-  if (lark_open_id !== undefined) {
-    const trimmed = typeof lark_open_id === 'string' ? lark_open_id.trim() : '';
+  if (parsed.lark_open_id !== undefined) {
+    const trimmed = typeof parsed.lark_open_id === 'string' ? parsed.lark_open_id.trim() : '';
     if (!trimmed) {
       nextOpenId = null;
     } else {
@@ -68,38 +63,27 @@ export async function PUT(
   }
 
   await execute(
-    'UPDATE users SET name = ?, role = COALESCE(?, role), lark_open_id = ? WHERE id = ?',
-    [cleanName, cleanRole, nextOpenId, id],
+    `UPDATE users
+      SET name = ?, role = COALESCE(?, role), department_id = ?, lark_open_id = ?
+      WHERE id = ?`,
+    [parsed.name, parsed.role, parsed.department_id, nextOpenId, id],
   );
 
-  const updated = await queryOne('SELECT id, email, name, role, lark_open_id, created_at FROM users WHERE id = ?', [id]);
+  const updated = await queryOne(USER_ROW_SQL, [id]);
   return NextResponse.json({ user: updated, ok: true });
 }
 
-// Delete a user. Blocked if they own tasks/replies, are the last boss, or are self.
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const user = await getSession();
-  const denied = requireBoss(user);
-  if (denied) return denied;
+  const denied = requireAdmin(user, 'Only an admin can manage users');
+  if (denied || !user) return denied ?? NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-
-  if (id === user!.id) return NextResponse.json({ error: 'You cannot delete yourself' }, { status: 400 });
-
-  const target = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = ?', [id]);
+  const target = await queryOne<{ id: string }>('SELECT id FROM users WHERE id = ?', [id]);
   if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 });
-
-  if (target.role === 'boss') {
-    const bossCount = await queryOne<{ n: string }>(
-      "SELECT COUNT(*)::text AS n FROM users WHERE role = 'boss'",
-    );
-    if (Number(bossCount?.n ?? 0) <= 1) {
-      return NextResponse.json({ error: 'Cannot delete the last boss' }, { status: 400 });
-    }
-  }
 
   const tasks = await queryOne<{ n: string }>(
     'SELECT COUNT(*)::text AS n FROM tasks WHERE assignee_id = ? OR created_by = ?',
@@ -109,16 +93,15 @@ export async function DELETE(
     'SELECT COUNT(*)::text AS n FROM task_replies WHERE user_id = ?',
     [id],
   );
-  const total = Number(tasks?.n ?? 0) + Number(replies?.n ?? 0);
-  if (total > 0) {
-    return NextResponse.json(
-      { error: `This user still has ${total} task(s)/reply(s). Reassign or delete them first.` },
-      { status: 409 },
-    );
-  }
+  const block = deleteUserBlock({
+    actorId: user.id,
+    targetId: id,
+    taskCount: Number(tasks?.n ?? 0),
+    replyCount: Number(replies?.n ?? 0),
+  });
+  if (block) return NextResponse.json({ error: block.error }, { status: block.status });
 
   await execute('DELETE FROM user_settings WHERE user_id = ?', [id]);
   await execute('DELETE FROM users WHERE id = ?', [id]);
-
   return NextResponse.json({ ok: true });
 }

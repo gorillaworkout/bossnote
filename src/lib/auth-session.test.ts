@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { NextResponse } from 'next/server.js';
+import { ADMIN_USER_ID, isAppRole } from './roles.ts';
 import {
   COOKIE_NAME,
   SESSION_MAX_AGE,
@@ -18,6 +19,7 @@ const SAMPLE: SessionUser = {
   email: 'bayu@example.com',
   name: 'Bayu',
   role: 'boss',
+  department_id: 'dept-general',
 };
 
 describe('sessionCookieOptions', () => {
@@ -68,9 +70,30 @@ describe('createSession / verifySessionToken', { concurrency: false }, () => {
     const token = await createSession({ ...SAMPLE, role: 'boss' });
     const user = await verifySessionToken(token);
     assert.deepEqual(user, SAMPLE);
+  });
 
-    const messy = { ...SAMPLE, role: 'member' as const, exp: 1, iat: 1 } as SessionUser & { exp: number; iat: number };
-    assert.deepEqual(toSessionUser(messy), { id: SAMPLE.id, email: SAMPLE.email, name: SAMPLE.name, role: 'member' });
+  it('keeps admin, boss, and member and drops every other role', async () => {
+    assert.equal(isAppRole('admin') && isAppRole('boss') && isAppRole('member'), true);
+    assert.equal(isAppRole('owner'), false);
+    assert.equal(ADMIN_USER_ID, 'admin-001');
+
+    const token = await createSession({ ...SAMPLE, role: 'boss', department_id: 'dept-general' });
+    assert.deepEqual(await verifySessionToken(token), {
+      ...SAMPLE,
+      role: 'boss',
+      department_id: 'dept-general',
+    });
+
+    assert.equal(toSessionUser({ ...SAMPLE, role: 'owner' }), null);
+    assert.deepEqual(
+      toSessionUser({ ...SAMPLE, role: 'admin', department_id: 'dept-general' }),
+      { ...SAMPLE, role: 'admin', department_id: null },
+    );
+    assert.deepEqual(toSessionUser({ ...SAMPLE, role: 'member' }), {
+      ...SAMPLE,
+      role: 'member',
+      department_id: 'dept-general',
+    });
   });
 
   it('rejects a token after JWT_SECRET changes', async () => {

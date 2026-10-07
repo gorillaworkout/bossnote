@@ -18,20 +18,41 @@ export {
   verifySessionToken,
 } from '@/lib/session';
 
+async function sessionFromUserId(id: string): Promise<SessionUser | null> {
+  const row = await queryOne<{
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    department_id: string | null;
+  }>('SELECT id, email, name, role, department_id FROM users WHERE id = ?', [id]);
+  if (!row) return null;
+  return toSessionUser(row);
+}
+
 export async function getSession(): Promise<SessionUser | null> {
   try {
     const cookieStore = await cookies();
     const token = cookieStore.get(COOKIE_NAME)?.value;
     if (!token) return null;
-    return verifySessionToken(token);
+    const tokenUser = await verifySessionToken(token);
+    if (!tokenUser) return null;
+    return sessionFromUserId(tokenUser.id);
   } catch {
     return null;
   }
 }
 
 export async function login(username: string, password: string): Promise<SessionUser | null> {
-  const user = await queryOne<{ id: string; email: string; name: string; password_hash: string; role: string }>(
-    'SELECT id, email, name, password_hash, role FROM users WHERE LOWER(name) = LOWER(?)',
+  const user = await queryOne<{
+    id: string;
+    email: string;
+    name: string;
+    password_hash: string;
+    role: string;
+    department_id: string | null;
+  }>(
+    'SELECT id, email, name, password_hash, role, department_id FROM users WHERE LOWER(name) = LOWER(?)',
     [username],
   );
   if (!user) return null;
@@ -43,7 +64,8 @@ export async function login(username: string, password: string): Promise<Session
     id: user.id,
     email: user.email,
     name: user.name,
-    role: user.role as 'boss' | 'member',
+    role: user.role,
+    department_id: user.department_id,
   });
 }
 
@@ -53,10 +75,13 @@ export async function getUsers(): Promise<SessionUser[]> {
       'SELECT id, email, name, role FROM users ORDER BY name',
     ),
   );
-  return rows.map(r => toSessionUser({
-    id: r.id,
-    email: r.email,
-    name: r.name,
-    role: r.role as 'boss' | 'member',
-  }));
+  return rows.flatMap((r) => {
+    const user = toSessionUser({
+      id: r.id,
+      email: r.email,
+      name: r.name,
+      role: r.role,
+    });
+    return user ? [user] : [];
+  });
 }

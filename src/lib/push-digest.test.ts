@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDigestPayload, groupOpenTasksByAssignee } from './push-digest.ts';
+import { buildDigestPayload, groupOpenTasksByAssignee, visibleDigestTasks } from './push-digest.ts';
 import { buildTypedTaskFields } from './typed-task.ts';
 import { taskTitles } from './task-title.ts';
 
@@ -38,6 +38,71 @@ describe('groupOpenTasksByAssignee / buildDigestPayload', () => {
     assert.ok(payload);
     assert.equal(payload.title, '1 open task');
     assert.equal(payload.body, 'You have 1 task: Review deck');
+  });
+});
+
+describe('visibleDigestTasks', () => {
+  const general = 'dept-general';
+  const other = 'dept-other';
+  const bayu = { id: 'bayu-001', role: 'member', department_id: general };
+  const ian = { id: 'boss-001', role: 'boss', department_id: general };
+
+  function task(fields: {
+    assignee_id: string;
+    created_by: string;
+    creator_role: string;
+    creator_department_id: string;
+    assignee_role: string;
+    assignee_department_id: string;
+    title: string;
+  }) {
+    return { ...fields, title_id: fields.title };
+  }
+
+  it('keeps a member’s own boss tasks and every open task assigned to a boss', () => {
+    const fromIan = task({
+      assignee_id: 'bayu-001',
+      created_by: 'boss-001',
+      creator_role: 'boss',
+      creator_department_id: general,
+      assignee_role: 'member',
+      assignee_department_id: general,
+      title: 'From Ian',
+    });
+    const fromSandra = task({
+      assignee_id: 'bayu-001',
+      created_by: 'sandra-001',
+      creator_role: 'member',
+      creator_department_id: general,
+      assignee_role: 'member',
+      assignee_department_id: general,
+      title: 'From Sandra',
+    });
+    const visible = visibleDigestTasks(bayu, [fromIan, fromSandra]);
+    assert.deepEqual(visible.map((row) => row.title), ['From Ian']);
+
+    const assignedToIan = [
+      task({
+        assignee_id: 'boss-001',
+        created_by: 'prista-001',
+        creator_role: 'boss',
+        creator_department_id: other,
+        assignee_role: 'boss',
+        assignee_department_id: general,
+        title: 'From Prista',
+      }),
+      task({
+        assignee_id: 'boss-001',
+        created_by: 'bayu-001',
+        creator_role: 'member',
+        creator_department_id: general,
+        assignee_role: 'boss',
+        assignee_department_id: general,
+        title: 'From Bayu',
+      }),
+    ];
+    assert.equal(visibleDigestTasks(ian, assignedToIan).length, 2);
+    assert.equal(visibleDigestTasks(bayu, [fromSandra]).length, 0);
   });
 });
 

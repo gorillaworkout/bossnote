@@ -3,8 +3,10 @@ import { getSession } from '@/lib/auth';
 import { queryAll, queryOne, execute } from '@/lib/database';
 import { processVoiceNote, getUserModel, normalizeAudioModel } from '@/lib/ai';
 import { resolveAssigneeFromHint } from '@/lib/assignee';
+import { candidateListQuery, isValidAssignmentPair, type Party } from '@/lib/assignment';
 import { readVoice } from '@/lib/voice-storage';
 import { publishTaskListChange } from '@/lib/task-live';
+import { canViewTask, type TaskParties } from '@/lib/task-access';
 
 /** Re-runs the AI pipeline on an already-stored voice note. */
 export async function POST(
@@ -15,12 +17,18 @@ export async function POST(
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const task = await queryOne<{ voice_path: string; assignee_id: string; created_by: string }>(
-    'SELECT voice_path, assignee_id, created_by FROM tasks WHERE id = ?',
+  const task = await queryOne<TaskParties & { voice_path: string | null }>(
+    `SELECT t.voice_path, t.assignee_id, t.created_by,
+       bu.role AS creator_role, bu.department_id AS creator_department_id,
+       au.role AS assignee_role, au.department_id AS assignee_department_id
+     FROM tasks t
+     JOIN users bu ON t.created_by = bu.id
+     JOIN users au ON t.assignee_id = au.id
+     WHERE t.id = ?`,
     [id],
   );
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  if (user.id !== task.assignee_id && user.id !== task.created_by) {
+  if (!canViewTask(user, task)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   if (!task.voice_path) return NextResponse.json({ error: 'No voice note on this task' }, { status: 400 });
@@ -33,11 +41,28 @@ export async function POST(
     const model = normalizeAudioModel(await getUserModel(user.id));
     const ai = await processVoiceNote(buffer.toString('base64'), mime, model);
 
-    const team = await queryAll<{ id: string; name: string }>(
-      'SELECT id, name FROM users ORDER BY name',
-    );
-    const fromVoice = resolveAssigneeFromHint(ai.assignee_hint, team);
-    const assigneeId = fromVoice?.id || task.assignee_id;
+    const creator: Party = {
+      id: task.created_by,
+      name: '',
+      role: task.creator_role,
+      department_id: task.creator_department_id,
+    };
+    const listed = candidateListQuery({
+      role: creator.role,
+      department_id: creator.department_id,
+    });
+    const candidateRows = listed
+      ? await queryAll<Omit<Party, 'department_id'>>(listed.sql, listed.values)
+      : [];
+    const candidates: Party[] = candidateRows.map((row) => ({
+      ...row,
+      department_id: creator.department_id,
+    }));
+    const hinted = resolveAssigneeFromHint(ai.assignee_hint, candidates);
+    const hintedParty = hinted ? candidates.find((person) => person.id === hinted.id) : undefined;
+    const assigneeId = hintedParty && isValidAssignmentPair(creator, hintedParty)
+      ? hintedParty.id
+      : task.assignee_id;
 
     await execute(
       `UPDATE tasks SET title = ?, title_id = ?, description = ?,

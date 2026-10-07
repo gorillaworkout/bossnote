@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { DashboardHeader } from '@/components/DashboardHeader';
 
@@ -9,8 +9,15 @@ interface User {
   name: string;
   email: string;
   role: string;
+  department_id: string | null;
+  department_name: string | null;
   lark_open_id?: string | null;
   created_at: string;
+}
+
+interface Department {
+  id: string;
+  name: string;
 }
 
 function fmtCreated(value: string) {
@@ -23,6 +30,7 @@ function fmtCreated(value: string) {
 export default function ManageUsersPage() {
   const [me, setMe] = useState<{ id: string; name: string; role: string } | null>(null);
   const [users, setUsers] = useState<User[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -30,10 +38,12 @@ export default function ManageUsersPage() {
   const [newName, setNewName] = useState('');
   const [newPw, setNewPw] = useState('');
   const [newRole, setNewRole] = useState<'boss' | 'member'>('member');
+  const [newDepartment, setNewDepartment] = useState('');
 
   const [editing, setEditing] = useState<User | null>(null);
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState<'boss' | 'member'>('member');
+  const [editDepartment, setEditDepartment] = useState('');
   const [editLarkOpenId, setEditLarkOpenId] = useState('');
 
   const [confirmDelete, setConfirmDelete] = useState<User | null>(null);
@@ -44,16 +54,23 @@ export default function ManageUsersPage() {
 
   const router = useRouter();
 
-  const load = async () => {
-    const r = await fetch('/api/admin/users');
-    const d = await r.json();
-    if (!r.ok) {
+  const load = useCallback(async () => {
+    const [usersRes, deptRes] = await Promise.all([
+      fetch('/api/admin/users', { credentials: 'include', cache: 'no-store' }),
+      fetch('/api/admin/departments', { credentials: 'include', cache: 'no-store' }),
+    ]);
+    const d = await usersRes.json();
+    const departmentsBody = await deptRes.json();
+    if (!usersRes.ok) {
       setMsg({ ok: false, text: d.error || 'Failed to load users' });
       setUsers([]);
-      return;
+    } else {
+      setUsers(d.users || []);
     }
-    setUsers(d.users || []);
-  };
+    const nextDepartments: Department[] = departmentsBody.departments || [];
+    setDepartments(nextDepartments);
+    setNewDepartment((current) => current || nextDepartments[0]?.id || '');
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +83,7 @@ export default function ManageUsersPage() {
           return;
         }
         setMe(d.user);
-        if (d.user.role !== 'boss') {
+        if (d.user.role !== 'admin') {
           router.push('/dashboard');
           return;
         }
@@ -76,16 +93,22 @@ export default function ManageUsersPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [router]);
+  }, [router, load]);
 
   const addUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (departments.length === 0) return;
     if (newPw.length < 6) { setMsg({ ok: false, text: 'Password must be at least 6 characters.' }); return; }
     setBusy(true); setMsg(null);
     try {
       const r = await fetch('/api/admin/users', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim(), password: newPw, role: newRole }),
+        body: JSON.stringify({
+          name: newName.trim(),
+          password: newPw,
+          role: newRole,
+          department_id: newDepartment,
+        }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Failed to add user');
@@ -101,9 +124,17 @@ export default function ManageUsersPage() {
     if (!editing) return;
     setBusy(true); setMsg(null);
     try {
+      const body: { name: string; lark_open_id: string; role?: string; department_id?: string } = {
+        name: editName.trim(),
+        lark_open_id: editLarkOpenId.trim(),
+      };
+      if (editing.role !== 'admin') {
+        body.role = editRole;
+        body.department_id = editDepartment;
+      }
       const r = await fetch(`/api/admin/users/${editing.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editName.trim(), role: editRole, lark_open_id: editLarkOpenId.trim() }),
+        body: JSON.stringify(body),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Failed to update user');
@@ -148,11 +179,12 @@ export default function ManageUsersPage() {
   if (loading) return <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center"><p className="text-sm text-zinc-600 animate-pulse">Loading…</p></div>;
   if (!me) return null;
 
-  const bossCount = users.filter(u => u.role === 'boss').length;
-  const canDelete = (u: User) => u.id !== me.id && !(u.role === 'boss' && bossCount <= 1);
+  const canDelete = (u: User) => u.role !== 'admin' && u.id !== me.id;
 
   const roleBadge = (role: string) => (
-    <span className={`px-2 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wider ${role === 'boss' ? 'bg-violet-950/50 text-violet-300' : 'bg-zinc-800 text-zinc-400'}`}>{role === 'boss' ? 'Boss' : 'Staff'}</span>
+    <span className={`px-2 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wider ${role === 'boss' ? 'bg-violet-950/50 text-violet-300' : role === 'admin' ? 'bg-amber-950/40 text-amber-300' : 'bg-zinc-800 text-zinc-400'}`}>
+      {role === 'boss' ? 'Boss' : role === 'admin' ? 'Admin' : 'Staff'}
+    </span>
   );
 
   return (
@@ -162,7 +194,7 @@ export default function ManageUsersPage() {
       <main className="flex-1 max-w-[760px] w-full mx-auto p-5 space-y-5">
         <div>
           <h2 className="text-[15px] font-semibold text-zinc-100">Manage Users</h2>
-          <p className="text-[12px] text-zinc-500 mt-0.5">Add, edit, or remove accounts. Staff see only their own tasks; bosses see everything.</p>
+          <p className="text-[12px] text-zinc-500 mt-0.5">The admin creates each person, picks Boss or Staff, and places them in a department.</p>
         </div>
 
         {msg && (
@@ -172,6 +204,9 @@ export default function ManageUsersPage() {
         <section className="card p-5">
           <h3 className="text-[12px] font-semibold text-zinc-200 mb-1">Add a new user</h3>
           <p className="text-[11px] text-zinc-600 mb-4">Login is by name (case-insensitive). Share the password securely — it is not shown again.</p>
+          {departments.length === 0 && (
+            <p className="text-[12px] text-amber-300 mb-3">Create a department first.</p>
+          )}
           <form onSubmit={addUser} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -187,10 +222,24 @@ export default function ManageUsersPage() {
               </div>
             </div>
             <div>
+              <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Department</label>
+              <select
+                value={newDepartment}
+                onChange={e => setNewDepartment(e.target.value)}
+                required
+                disabled={departments.length === 0}
+                className="input-field w-full px-3 py-2.5 text-[14px] cursor-pointer disabled:opacity-60"
+              >
+                {departments.map((department) => (
+                  <option key={department.id} value={department.id}>{department.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
               <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Password (min 6 chars)</label>
               <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} required autoComplete="new-password" className="input-field w-full px-3.5 py-2.5 text-[14px]" />
             </div>
-            <button type="submit" disabled={busy} className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg text-[13px] transition-all shadow-[0_2px_8px_rgb(99_102_241/0.2)]">{busy ? 'Adding…' : 'Add user'}</button>
+            <button type="submit" disabled={busy || departments.length === 0} className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg text-[13px] transition-all shadow-[0_2px_8px_rgb(99_102_241/0.2)]">{busy ? 'Adding…' : 'Add user'}</button>
           </form>
         </section>
 
@@ -208,6 +257,7 @@ export default function ManageUsersPage() {
                       {u.id === me.id && <span className="text-[10px] text-zinc-600">(you)</span>}
                       {roleBadge(u.role)}
                     </div>
+                    <p className="text-[11px] text-zinc-600 truncate">{u.department_name || 'No department'}</p>
                     <p className="text-[11px] text-zinc-600 truncate">{u.email}</p>
                     <p className="text-[10px] text-zinc-700 mt-0.5">
                       Created {fmtCreated(u.created_at)}
@@ -217,12 +267,18 @@ export default function ManageUsersPage() {
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button
                       type="button"
-                      onClick={() => { setEditing(u); setEditName(u.name); setEditRole(u.role === 'boss' ? 'boss' : 'member'); setEditLarkOpenId(u.lark_open_id || ''); }}
+                      onClick={() => {
+                        setEditing(u);
+                        setEditName(u.name);
+                        setEditRole(u.role === 'boss' ? 'boss' : 'member');
+                        setEditDepartment(u.department_id || '');
+                        setEditLarkOpenId(u.lark_open_id || '');
+                      }}
                       className="text-[11px] text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded-md hover:bg-zinc-800 transition-colors"
                     >
                       Edit
                     </button>
-                    {u.id !== me.id && (
+                    {u.role !== 'admin' && u.id !== me.id && (
                       <button
                         type="button"
                         onClick={() => { setResetting(u); setResetPw(''); setResetConfirm(''); setMsg(null); }}
@@ -257,21 +313,36 @@ export default function ManageUsersPage() {
                 <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Name</label>
                 <input type="text" value={editName} onChange={e => setEditName(e.target.value)} required className="input-field w-full px-3 py-2.5 text-[14px]" />
               </div>
-              <div>
-                <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Role</label>
-                <select
-                  value={editRole}
-                  onChange={e => setEditRole(e.target.value as 'boss' | 'member')}
-                  disabled={editing.id === me.id}
-                  className="input-field w-full px-3 py-2.5 text-[14px] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  <option value="member">Staff</option>
-                  <option value="boss">Boss</option>
-                </select>
-                {editing.id === me.id && (
-                  <p className="text-[11px] text-zinc-600 mt-1.5">You cannot change your own role.</p>
-                )}
-              </div>
+              {editing.role === 'admin' ? (
+                <p className="text-[12px] text-zinc-500">This admin account has no department.</p>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Role</label>
+                    <select
+                      value={editRole}
+                      onChange={e => setEditRole(e.target.value as 'boss' | 'member')}
+                      className="input-field w-full px-3 py-2.5 text-[14px] cursor-pointer"
+                    >
+                      <option value="member">Staff</option>
+                      <option value="boss">Boss</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Department</label>
+                    <select
+                      value={editDepartment}
+                      onChange={e => setEditDepartment(e.target.value)}
+                      required
+                      className="input-field w-full px-3 py-2.5 text-[14px] cursor-pointer"
+                    >
+                      {departments.map((department) => (
+                        <option key={department.id} value={department.id}>{department.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
               <div>
                 <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Lark Open ID (optional)</label>
                 <input type="text" value={editLarkOpenId} onChange={e => setEditLarkOpenId(e.target.value)} placeholder="ou_…" autoComplete="off" className="input-field w-full px-3 py-2.5 text-[14px]" />
@@ -281,6 +352,9 @@ export default function ManageUsersPage() {
                 <button type="button" onClick={() => setEditing(null)} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[13px] font-medium py-2 rounded-lg transition-colors">Cancel</button>
                 <button type="submit" disabled={busy} className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 text-white text-[13px] font-medium py-2 rounded-lg transition-all">{busy ? 'Saving…' : 'Save'}</button>
               </div>
+              {editing.role !== 'admin' && (
+                <p className="text-[11px] text-zinc-500">Their visible tasks and allowed assignees follow the new role and department immediately. Tasks are not deleted.</p>
+              )}
             </form>
           </div>
         </div>

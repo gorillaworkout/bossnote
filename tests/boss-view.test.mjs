@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const dashboard = readFileSync(join(root, 'src/app/dashboard/page.tsx'), 'utf8');
+const dashboard = readFileSync(join(root, 'src/components/TaskBoard.tsx'), 'utf8');
 const imageField = readFileSync(join(root, 'src/components/TaskImageField.tsx'), 'utf8');
 const screenshot = readFileSync(join(root, 'src/components/TaskScreenshot.tsx'), 'utf8');
 const tasksRoute = readFileSync(join(root, 'src/app/api/tasks/route.ts'), 'utf8');
@@ -38,7 +38,10 @@ describe('boss assigned-to-me board', () => {
     assert.match(dashboard, /taskScope === 'all'/);
     assert.match(taskListScope, /No tasks created by you/);
     assert.match(taskListScope, /No tasks assigned to you/);
-    assert.match(taskListScope, /\(t\.assignee_id = \? OR t\.created_by = \?\)/);
+    assert.match(taskListScope, /bu\.role = 'boss'/);
+    assert.match(taskListScope, /au\.role = 'boss'/);
+    assert.match(taskListScope, /bu\.department_id = \?/);
+    assert.match(taskListScope, /au\.department_id = \?/);
     assert.match(tasksRoute, /buildTaskListQuery/);
     assert.match(tasksRoute, /searchParams\.get\('scope'\)/);
   });

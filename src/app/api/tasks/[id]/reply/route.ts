@@ -4,6 +4,7 @@ import { queryOne, execute } from '@/lib/database';
 import { transcribeReply, getUserModel } from '@/lib/ai';
 import { saveVoice, voiceExt } from '@/lib/voice-storage';
 import { publishTaskListChange } from '@/lib/task-live';
+import { canViewTask, type TaskParties } from '@/lib/task-access';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function POST(
@@ -14,12 +15,18 @@ export async function POST(
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const task = await queryOne<{ assignee_id: string; created_by: string }>(
-    'SELECT assignee_id, created_by FROM tasks WHERE id = ?',
+  const task = await queryOne<TaskParties>(
+    `SELECT t.assignee_id, t.created_by,
+       bu.role AS creator_role, bu.department_id AS creator_department_id,
+       au.role AS assignee_role, au.department_id AS assignee_department_id
+     FROM tasks t
+     JOIN users bu ON t.created_by = bu.id
+     JOIN users au ON t.assignee_id = au.id
+     WHERE t.id = ?`,
     [id],
   );
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  if (user.id !== task.assignee_id && user.id !== task.created_by) {
+  if (!canViewTask(user, task)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -75,10 +82,14 @@ export async function POST(
       'SELECT questions, answered_questions FROM tasks WHERE id = ?',
       [id],
     );
-    const qs: string[] = (t?.questions && (t.questions as unknown as any[])?.length > 0)
-      ? t.questions as unknown as string[] : [];
-    const ans: number[] = (t?.answered_questions && (t.answered_questions as unknown as any[])?.length > 0)
-      ? t.answered_questions as unknown as number[] : [];
+    const rawQuestions: unknown = t?.questions;
+    const qs: string[] = Array.isArray(rawQuestions)
+      ? rawQuestions.filter((item): item is string => typeof item === 'string')
+      : [];
+    const rawAnswers: unknown = t?.answered_questions;
+    const ans: number[] = Array.isArray(rawAnswers)
+      ? rawAnswers.filter((item): item is number => typeof item === 'number')
+      : [];
 
     if (questionIndex < qs.length && !ans.includes(questionIndex)) {
       ans.push(questionIndex);

@@ -7,10 +7,12 @@ const LIST_SELECT = `
     SELECT t.*,
       bu.name as boss_name,
       au.name as assignee_name,
+      ad.name AS assignee_department_name,
       (SELECT COUNT(*) FROM task_replies WHERE task_id = t.id) as reply_count
     FROM tasks t
     JOIN users bu ON t.created_by = bu.id
     JOIN users au ON t.assignee_id = au.id
+    LEFT JOIN departments ad ON ad.id = au.department_id
   `;
 
 export function isTaskListScope(value: string | null | undefined): value is TaskListScope {
@@ -49,7 +51,7 @@ export function emptyTaskScopeMessage(scope: TaskListScope): string {
 }
 
 export function buildTaskListQuery(input: {
-  user: { id: string; role: string };
+  user: { id: string; role: string; department_id?: string | null };
   scope?: string | null;
   assignee?: string | null;
   status?: string | null;
@@ -59,18 +61,30 @@ export function buildTaskListQuery(input: {
   const conditions: string[] = [];
   const values: string[] = [];
   const isBoss = input.user.role === 'boss';
+  const departmentId = input.user.department_id ?? null;
 
-  if (!isBoss) {
+  if (input.user.role === 'admin' || (!isBoss && !departmentId)) {
+    conditions.push('FALSE');
+  } else if (!isBoss && departmentId) {
     const memberScope = scope ?? 'assigned';
     if (memberScope === 'assigned') {
-      conditions.push('t.assignee_id = ?');
-      values.push(input.user.id);
+      conditions.push("t.assignee_id = ? AND t.created_by <> ? AND bu.role = 'boss' AND bu.department_id = ?");
+      values.push(input.user.id, input.user.id, departmentId);
     } else if (memberScope === 'created') {
-      conditions.push('t.created_by = ?');
-      values.push(input.user.id);
+      conditions.push("t.created_by = ? AND t.assignee_id <> ? AND au.role = 'boss' AND au.department_id = ?");
+      values.push(input.user.id, input.user.id, departmentId);
     } else {
-      conditions.push('(t.assignee_id = ? OR t.created_by = ?)');
-      values.push(input.user.id, input.user.id);
+      conditions.push(
+        "(t.assignee_id = ? AND t.created_by <> ? AND bu.role = 'boss' AND bu.department_id = ?) OR (t.created_by = ? AND t.assignee_id <> ? AND au.role = 'boss' AND au.department_id = ?)",
+      );
+      values.push(
+        input.user.id,
+        input.user.id,
+        departmentId,
+        input.user.id,
+        input.user.id,
+        departmentId,
+      );
     }
   } else if (scope === 'assigned') {
     conditions.push('t.assignee_id = ?');

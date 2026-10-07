@@ -9,7 +9,7 @@ import {
   taskListScopeLabel,
 } from './task-list-scope.ts';
 
-const bayu = { id: 'bayu-001', role: 'member' };
+const bayu = { id: 'bayu-001', role: 'member', department_id: 'dept-general' };
 const boss = { id: 'boss-001', role: 'boss' };
 
 describe('default task list scope', () => {
@@ -45,50 +45,82 @@ describe('task list scope labels and empty copy', () => {
 });
 
 describe('buildTaskListQuery', () => {
-  it('scopes a member to tasks assigned to them', () => {
+  it('scopes a member to tasks assigned to them by a boss in their department', () => {
     const query = buildTaskListQuery({ user: bayu, scope: 'assigned' });
     assert.match(query.sql, /t\.assignee_id = \?/);
-    assert.doesNotMatch(query.sql, /t\.created_by = \?/);
-    assert.deepEqual(query.values, ['bayu-001']);
+    assert.match(query.sql, /t\.created_by <> \?/);
+    assert.match(query.sql, /bu\.role = 'boss'/);
+    assert.match(query.sql, /bu\.department_id = \?/);
+    assert.deepEqual(query.values, ['bayu-001', 'bayu-001', 'dept-general']);
   });
 
-  it('scopes a member to tasks they created', () => {
+  it('scopes a member to tasks they created for a boss in their department', () => {
     const query = buildTaskListQuery({ user: bayu, scope: 'created' });
     assert.match(query.sql, /t\.created_by = \?/);
-    assert.doesNotMatch(query.sql, /t\.assignee_id = \?/);
-    assert.deepEqual(query.values, ['bayu-001']);
+    assert.match(query.sql, /t\.assignee_id <> \?/);
+    assert.match(query.sql, /au\.role = 'boss'/);
+    assert.match(query.sql, /au\.department_id = \?/);
+    assert.deepEqual(query.values, ['bayu-001', 'bayu-001', 'dept-general']);
   });
 
   it('lets a member see the union of assigned and created tasks without other people', () => {
     const query = buildTaskListQuery({ user: bayu, scope: 'all', assignee: 'boss-001' });
-    assert.match(query.sql, /\(t\.assignee_id = \? OR t\.created_by = \?\)/);
-    assert.deepEqual(query.values, ['bayu-001', 'bayu-001']);
-    assert.doesNotMatch(query.sql, /boss-001/);
+    assert.match(query.sql, /t\.assignee_id = \?/);
+    assert.match(query.sql, /t\.created_by <> \?/);
+    assert.match(query.sql, /bu\.role = 'boss'/);
+    assert.match(query.sql, /t\.created_by = \?/);
+    assert.match(query.sql, /au\.role = 'boss'/);
+    assert.match(query.sql, / OR /);
+    assert.deepEqual(query.values, [
+      'bayu-001',
+      'bayu-001',
+      'dept-general',
+      'bayu-001',
+      'bayu-001',
+      'dept-general',
+    ]);
+    assert.equal(query.values.includes('boss-001'), false);
   });
 
   it('keeps a member on assigned tasks when scope is missing or unknown', () => {
     for (const scope of [null, undefined, '', 'everything']) {
       const query = buildTaskListQuery({ user: bayu, scope });
       assert.match(query.sql, /t\.assignee_id = \?/);
-      assert.doesNotMatch(query.sql, /t\.created_by = \?/);
-      assert.deepEqual(query.values, ['bayu-001']);
+      assert.match(query.sql, /t\.created_by <> \?/);
+      assert.match(query.sql, /bu\.role = 'boss'/);
+      assert.match(query.sql, /bu\.department_id = \?/);
+      assert.deepEqual(query.values, ['bayu-001', 'bayu-001', 'dept-general']);
     }
+  });
+
+  it('hides every task from a member who has no department', () => {
+    const query = buildTaskListQuery({
+      user: { id: 'bayu-001', role: 'member', department_id: null },
+      scope: 'all',
+      assignee: 'boss-001',
+    });
+    assert.match(query.sql, /FALSE/);
+    assert.equal(query.values.includes('boss-001'), false);
   });
 
   it('lets a boss list everything unless scope says assigned or created', () => {
     const omitted = buildTaskListQuery({ user: boss, scope: null });
+    assert.match(omitted.sql, /assignee_department_name/);
     assert.doesNotMatch(omitted.sql, /au\.id\s+WHERE/);
     assert.deepEqual(omitted.values, []);
 
     const assigned = buildTaskListQuery({ user: boss, scope: 'assigned' });
     assert.match(assigned.sql, /t\.assignee_id = \?/);
+    assert.match(assigned.sql, /assignee_department_name/);
     assert.deepEqual(assigned.values, ['boss-001']);
 
     const created = buildTaskListQuery({ user: boss, scope: 'created' });
     assert.match(created.sql, /t\.created_by = \?/);
+    assert.match(created.sql, /assignee_department_name/);
     assert.deepEqual(created.values, ['boss-001']);
 
     const all = buildTaskListQuery({ user: boss, scope: 'all' });
+    assert.match(all.sql, /assignee_department_name/);
     assert.doesNotMatch(all.sql, /au\.id\s+WHERE/);
     assert.deepEqual(all.values, []);
   });
@@ -121,6 +153,6 @@ describe('buildTaskListQuery', () => {
     const query = buildTaskListQuery({ user: bayu, scope: 'created', status: 'waiting' });
     assert.match(query.sql, /ORDER BY t\.created_at DESC LIMIT 100/);
     assert.match(query.sql, /task_replies/);
-    assert.deepEqual(query.values, ['bayu-001', 'waiting']);
+    assert.deepEqual(query.values, ['bayu-001', 'bayu-001', 'dept-general', 'waiting']);
   });
 });

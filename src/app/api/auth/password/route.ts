@@ -39,7 +39,9 @@ export async function PUT(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (user.role !== 'boss') return NextResponse.json({ error: 'Only a boss can reset passwords' }, { status: 403 });
+  if (user.role !== 'admin') {
+    return NextResponse.json({ error: 'Only an admin can reset passwords' }, { status: 403 });
+  }
 
   const { user_id, new_password } = (await request.json()) as {
     user_id?: string;
@@ -52,8 +54,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `New password must be at least ${MIN_LEN} characters` }, { status: 400 });
   }
 
-  const target = await queryOne('SELECT id FROM users WHERE id = ?', [String(user_id)]);
+  const target = await queryOne<{ id: string; role: string }>('SELECT id, role FROM users WHERE id = ?', [String(user_id)]);
   if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  if (String(user_id) === user.id || target.role === 'admin') {
+    return NextResponse.json({ error: 'Use Account to change your own password.' }, { status: 400 });
+  }
 
   const hash = bcrypt.hashSync(String(new_password), 10);
   await execute('UPDATE users SET password_hash = ? WHERE id = ?', [hash, String(user_id)]);
