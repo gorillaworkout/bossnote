@@ -42,11 +42,11 @@ Add those to `.env` on the server. Also required: `DATABASE_URL`, `JWT_SECRET`, 
 
 After login, the dashboard registers `/sw.js?v=9` (`bossnote-v9`). `/api/`, document navigations, `/manifest.json`, `/sw.js`, `/_next/`, and `?_rsc=` requests are network-only so the `bn_token` session cookie is not dropped on reopen and a deploy cannot keep serving the previous dashboard script. Non-http(s) schemes (e.g. `chrome-extension://`) are left unhandled so `Cache.put` does not throw. Push subscription is stored at `POST /api/push/subscribe`. `POST /api/push/test` sends a test notification to the current user.
 
-Login lasts **90 days** on the same browser/PWA (`bn_token` httpOnly cookie + JWT). Opening `/` or the installed app while still signed in goes to the dashboard. Logout clears the cookie. Keep `JWT_SECRET` stable across process restarts or existing sessions become invalid.
+Login lasts **90 days** on the same browser/PWA (`bn_token` httpOnly cookie + JWT). Opening `/` while signed in goes to Manage Departments for admin and to the board for a boss or member. Logout clears the cookie. Keep `JWT_SECRET` stable across process restarts or existing sessions become invalid.
 
 ## Lark group notify (AgenticOS Group)
 
-English-only bosses who miss phone push still see new tasks in Lark. After a successful create (and reassign), BossNote fire-and-forgets a group text:
+English-only bosses who miss phone push still see new tasks in Lark. Manage Users is the admin page. After a successful create (and reassign), BossNote fire-and-forgets a group text:
 
 ```
 New task: {title}
@@ -112,21 +112,21 @@ If any required Lark var is missing, create/reassign still succeeds; Lark is ski
 Applies `migrations/007_push_subscriptions.sql`, then:
 
 ```
-0 10 * * * TZ=Asia/Jakarta cd /home/ubuntu/apps/bossnote && set -a && . ./.env && set +a && /usr/bin/node scripts/daily-task-notify.mjs >> /home/ubuntu/logs/bossnote-notify.log 2>&1
+0 10 * * * TZ=Asia/Jakarta cd /home/ubuntu/apps/bossnote && set -a && . ./.env && set +a && /usr/bin/node --experimental-strip-types scripts/daily-task-notify.mjs >> /home/ubuntu/logs/bossnote-notify.log 2>&1
 ```
 
-The script skips users with zero open tasks (`todo` / `in_progress` / `waiting`) and drops dead subscriptions (410/404).
+The script skips users with zero open tasks (`todo` / `in_progress` / `waiting`) and drops dead subscriptions (410/404). A member’s digest includes only open tasks that pass that member’s visibility rule.
 
 ## Create tasks / reminders
 
 Any logged-in user (member or boss) can create:
 
-- **Voice** — same AI pipeline (Gemini 3.7 default + `assignee_hint`). Assignee can be staff or boss. Auto-from-voice still works. A form-selected assignee wins over the AI name hint. If neither resolves, `POST /api/tasks` returns `400` with `code: assignee_required` and the dashboard asks **Who is this task for?** then retries the same recording with `assignee_id`.
+- **Voice** — same AI pipeline (Gemini 3.7 default + `assignee_hint`). The assignee must be the opposite role in the same department. Auto-from-voice still works. A form-selected assignee wins over the AI name hint. If neither resolves, `POST /api/tasks` returns `400` with `code: assignee_required` and the dashboard asks **Who is this task for?** then retries the same recording with `assignee_id`.
 - **Type** — typed title/reminder, no LLM. Works when Gemini is down. `POST /api/tasks` with `text` / `title` (+ `assignee_id`, optional `priority`, `deadline`). JSON body is also accepted.
 
 On create (and reassign), the assignee gets a fire-and-forget push to **every** stored device: title `New task`, body = English task title, tap opens that task. The same events also post an English text message to the Lark group and, when the assignee’s open_id resolves, a personal Lark DM (see **Lark group notify** above).
 
-The board has **Assigned to me**, **Created by me**, and **All**. Bosses open on **Assigned to me**. Other users open on **Created by me**. The choice is kept in the `scope` query (`assigned`, `created`, or `all`) and in local storage. **All** is every task that user is allowed to see: bosses see the whole board (and can still narrow it with the assignee picker); members see tasks assigned to them or created by them. The assignee picker lists staff and every Boss account as `Name (Boss)`.
+A boss’s create list is the staff in that boss’s department; a staff member’s create list is the bosses in their department. Reassign uses `GET /api/tasks/:id/assignees` for the original creator’s department. Bosses still open the board on Assigned to me and can filter All with the company directory. Staff still open on Created by me and only see their own tasks with a boss in their department. The board still has **Assigned to me**, **Created by me**, and **All**. The choice is kept in the `scope` query (`assigned`, `created`, or `all`) and in local storage. Assignee options are labeled `Name (Boss)` or `Name (Staff)`.
 
 ### Screenshots
 
@@ -185,8 +185,12 @@ Keep the same `proxy_set_header` values the rest of the BossNote site already us
 
 1. `npm i`
 2. Apply `migrations/007_push_subscriptions.sql`, `migrations/008_lark_open_id.sql`, `migrations/009_task_image.sql`, and `migrations/010_task_images.sql`
-3. Optional: `IMAGE_UPLOAD_DIR=/home/ubuntu/data/bossnote-images` (create the directory; do not commit photos)
-4. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify and assignee DMs, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`, `LARK_OPEN_IDS` keyed by `boss-001`, `bayu-001`, `prista-001`, `sandra-001`). Enable bot scopes for group send, user DM (`im:message.p2p_msg:send_as_bot`), and email → open_id (`contact:user.id:readonly`). See **Lark group notify** for the Dupoin emails to resolve.
-5. Install the crontab line above
-6. Rebuild / restart (`npm run build && npm start` or your Oracle process manager)
-7. Installed PWAs pick up `bossnote-v9` after the next visit (the page reloads once when the new worker takes control)
+3. Apply `migrations/011_departments.sql` with the other migrations. It seeds the `General` department and assigns existing bosses and staff to it. It does not create the admin login.
+4. On the Oracle server `.env`, next to `JWT_SECRET` and the Lark variables, set `ADMIN_PASSWORD` (at least 6 characters). `ADMIN_NAME` is optional; a blank name becomes `Admin` and the derived email is `admin@bossnote.id`.
+5. From the app directory, with that env loaded: `node --experimental-strip-types scripts/seed-admin.mjs`. Run it after the migration. Running it again updates the admin password hash and leaves Ian, Bayu, Sandra, and Prista unchanged.
+6. Do not commit `ADMIN_PASSWORD` or the hash. `.env.example` keeps both admin variables empty.
+7. Optional: `IMAGE_UPLOAD_DIR=/home/ubuntu/data/bossnote-images` (create the directory; do not commit photos)
+8. Set VAPID env vars (generate with `npx web-push generate-vapid-keys`). For Lark group notify and assignee DMs, set `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_CHAT_ID` (optional `LARK_API_BASE`, `BOSSNOTE_URL`, `LARK_OPEN_IDS` keyed by `boss-001`, `bayu-001`, `prista-001`, `sandra-001`). Enable bot scopes for group send, user DM (`im:message.p2p_msg:send_as_bot`), and email → open_id (`contact:user.id:readonly`). See **Lark group notify** for the Dupoin emails to resolve.
+9. Install the crontab line above (`/usr/bin/node --experimental-strip-types scripts/daily-task-notify.mjs`)
+10. Rebuild / restart (`npm run build && npm start` or your Oracle process manager)
+11. Installed PWAs pick up `bossnote-v9` after the next visit (the page reloads once when the new worker takes control)
