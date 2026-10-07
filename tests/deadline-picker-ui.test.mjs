@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const dashboard = readFileSync(join(root, 'src/app/dashboard/page.tsx'), 'utf8');
+const dashboard = readFileSync(join(root, 'src/components/TaskBoard.tsx'), 'utf8');
 const field = readFileSync(join(root, 'src/components/DeadlineField.tsx'), 'utf8');
 
 describe('typed create deadline picker', () => {

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const dashboard = readFileSync(join(root, 'src/app/dashboard/page.tsx'), 'utf8');
+const dashboard = readFileSync(join(root, 'src/components/TaskBoard.tsx'), 'utf8');
 const account = readFileSync(join(root, 'src/app/dashboard/account/page.tsx'), 'utf8');
 const route = readFileSync(join(root, 'src/app/api/tasks/route.ts'), 'utf8');
 const banner = readFileSync(join(root, 'src/components/PushEnableBanner.tsx'), 'utf8');

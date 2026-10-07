@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
-const dashboard = readFileSync(new URL('../src/app/dashboard/page.tsx', import.meta.url), 'utf8');
+const dashboard = readFileSync(new URL('../src/components/TaskBoard.tsx', import.meta.url), 'utf8');
 const hook = readFileSync(new URL('../src/components/use-live-task-list.ts', import.meta.url), 'utf8');
 const eventsRoute = readFileSync(new URL('../src/app/api/tasks/events/route.ts', import.meta.url), 'utf8');
 const tasksRoute = readFileSync(new URL('../src/app/api/tasks/route.ts', import.meta.url), 'utf8');
